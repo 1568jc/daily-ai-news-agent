@@ -29,7 +29,6 @@ class WebTests(unittest.TestCase):
         response = self.client.post("/subscriptions", data={"nickname": "测试用户", "email": "web@example.com", "topics": ["AI 编程工具"], "keywords": "MCP"}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn("订阅已保存", response.text)
-        user_id = self.settings.database
         database = self.client.app.state.database
         user = database.list_users()[0]
         response = self.client.post(f"/users/{user['id']}/generate", follow_redirects=True)
