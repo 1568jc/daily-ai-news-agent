@@ -36,6 +36,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("仅预览", response.text)
         self.assertIn("本次工具调用", response.text)
         self.assertIn("演示样例", response.text)
+        self.assertIn('id="workbench"', response.text)
+        self.assertIn('id="split-divider"', response.text)
+        self.assertIn('class="brief-switcher"', response.text)
+        self.assertIn('data-brief-panel=', response.text)
+        self.assertIn("/static/app.js", response.text)
 
     def test_demo_seed_prepares_comparison_and_empty_workspace_runs(self):
         response = self.client.post("/demo/seed", follow_redirects=True)

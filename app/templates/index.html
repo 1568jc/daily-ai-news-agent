@@ -1,15 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero">
+<section class="page-heading">
   <div>
-    <p class="eyebrow">DAILY BRIEFING</p>
-    <h1>让 Agent 决定如何找到你在意的 AI 新闻</h1>
-    <p>RSS / Atom 材料 · 个性化筛选 · 工具轨迹可查验 · 邮件投递</p>
+    <p class="eyebrow">DAILY BRIEFING WORKSPACE</p>
+    <h1>每日 AI 新闻工作台</h1>
+    <p>左侧管理订阅，右侧阅读结果；生成状态与工具轨迹在当前任务中呈现。</p>
   </div>
   {% if settings.demo_mode %}
-  <form method="post" action="/demo/seed">
-    <button class="secondary" type="submit">一键准备三位演示用户</button>
-  </form>
+  <form method="post" action="/demo/seed"><button class="secondary" type="submit">准备演示用户</button></form>
   {% endif %}
 </section>
 
@@ -22,6 +20,7 @@
       <button class="secondary" type="submit">查询</button>
       {% if q %}<a href="/?user_id={{ selected.id if selected else '' }}">清除</a>{% endif %}
     </form>
+    <div class="user-list">
     {% if users %}
       {% for user in users %}
       <a class="user-link {% if selected and selected.id == user.id %}active{% endif %}" href="/?user_id={{ user.id }}">
@@ -29,6 +28,7 @@
       </a>
       {% endfor %}
     {% elif q %}<p class="muted">未找到匹配“{{ q }}”的用户。</p>{% else %}<p class="muted">还没有用户，请从右侧创建订阅。</p>{% endif %}
+    </div>
     <div class="schedule">
       <strong>自动任务</strong>
       <p>每天 {{ '%02d'|format(settings.daily_hour) }}:{{ '%02d'|format(settings.daily_minute) }}（北京时间）</p>
@@ -36,7 +36,8 @@
     </div>
   </aside>
 
-  <section class="panel subscription">
+  <div class="workbench" id="workbench">
+  <section class="panel subscription" id="subscription-pane">
     <div class="panel-heading"><h2>{{ '修改用户与订阅' if selected else '创建用户与订阅' }}</h2>{% if selected %}<span class="muted">ID {{ selected.id[:8] }}</span>{% endif %}</div>
     <form method="post" action="/subscriptions">
       {% if selected %}<input type="hidden" name="user_id" value="{{ selected.id }}">{% endif %}
@@ -75,14 +76,23 @@
     </form>
     {% endif %}
   </section>
-</div>
+  <div class="split-divider" id="split-divider" role="separator" tabindex="0" aria-label="拖拽调整订阅和简报面板宽度" aria-orientation="vertical"></div>
 
 {% if selected %}
-<section class="history" id="history" data-run-id="{{ briefs[0].run_id if briefs and briefs[0].run_id else '' }}" data-tool-count="{{ briefs[0].tool_calls|length if briefs else 0 }}">
-  <div class="section-heading"><h2>{{ selected.nickname }}的历史简报</h2><span>{{ briefs|length }} 份</span></div>
-  {% if not briefs %}<div class="panel empty">暂无简报。保存订阅后点击“立即生成”。</div>{% endif %}
+<section class="history panel" id="history" data-run-id="{{ briefs[0].run_id if briefs and briefs[0].run_id else '' }}" data-tool-count="{{ briefs[0].tool_calls|length if briefs else 0 }}">
+  <div class="section-heading">
+    <div><p class="eyebrow">BRIEFING OUTPUT</p><h2>简报工作台</h2><p class="muted">{{ selected.nickname }} · 生成结果直接显示在这里</p></div>
+    <span>{{ briefs|length }} 份</span>
+  </div>
+  {% if briefs %}
+  <div class="brief-switcher" role="tablist" aria-label="历史简报">
+    {% for brief in briefs %}
+    <button type="button" role="tab" id="tab-{{ brief.id }}" aria-controls="brief-{{ brief.id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" class="brief-tab {{ 'active' if loop.first else '' }}" data-brief-target="{{ brief.id }}">{{ brief.brief_date }}<span>{{ brief.status_label }}</span></button>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty"><strong>还没有简报</strong><p>保存订阅后点击“立即生成”，结果会在这里出现，无需滚动到页面底部。</p></div>{% endif %}
   {% for brief in briefs %}
-  <article class="panel brief">
+  <article class="brief" id="brief-{{ brief.id }}" role="tabpanel" aria-labelledby="tab-{{ brief.id }}" data-brief-panel="{{ brief.id }}" {% if not loop.first %}hidden{% endif %}>
     <div class="brief-header">
       <div><p class="eyebrow">{{ brief.brief_date }}</p><h3>每日 AI 新闻简报</h3></div>
       <span class="status status-{{ brief.status }}">{{ brief.status_label }}</span>
@@ -148,7 +158,13 @@
   </article>
   {% endfor %}
 </section>
+{% else %}
+<section class="history panel empty-workspace" id="history">
+  <div><p class="eyebrow">BRIEFING OUTPUT</p><h2>简报工作台</h2><p>选择或创建一个用户后，在这里阅读简报、切换历史和检查 Agent 工具轨迹。</p></div>
+</section>
 {% endif %}
+  </div>
+</div>
 {% if auto_refresh and selected %}
 <script>
 const userId = "{{ selected.id }}";
@@ -160,6 +176,7 @@ let missingPolls = 0;
 async function updateHistory() {
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
+  const panelScrollTop = historyPanel.scrollTop;
   const response = await fetch("/?user_id=" + encodeURIComponent(userId), {cache: "no-store"});
   if (!response.ok) throw new Error("history refresh failed");
   const documentCopy = new DOMParser().parseFromString(await response.text(), "text/html");
@@ -169,6 +186,7 @@ async function updateHistory() {
   historyPanel = freshPanel;
   runId = historyPanel.dataset.runId || "";
   toolCount = Number(historyPanel.dataset.toolCount || 0);
+  historyPanel.scrollTop = panelScrollTop;
   window.scrollTo(scrollX, scrollY);
 }
 
