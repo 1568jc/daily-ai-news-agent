@@ -57,7 +57,7 @@ DEEPSEEK_MODEL=deepseek-flash
 AINEWS_NOW=
 ```
 
-重启服务后创建订阅并点击“立即生成并预览/推送”。每轮调用均传入 `tools` 和：
+重启服务后创建订阅并点击“立即生成并预览/推送”。任务在后台执行，页面每 4 秒自动刷新状态；生成过程中仍可查看已执行的工具记录。每轮模型调用均传入 `tools` 和：
 
 ```python
 extra_body={"thinking": {"type": "disabled"}}

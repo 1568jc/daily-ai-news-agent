@@ -107,6 +107,7 @@ class NewsRepository:
         self.records: dict[str, dict] = {}
         self.fetch_successes = 0
         self.fetch_failures = 0
+        self._fetch_cache: dict[tuple[str, str], dict] = {}
         for path in sorted(self.news_dir.glob("*.json")):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -156,6 +157,10 @@ class NewsRepository:
         since_dt = parse_datetime(since)
         if since_dt > self.now + timedelta(minutes=5):
             raise NewsError("since 不能晚于当前任务时间")
+        cache_key = (source_id, isoformat(since_dt))
+        cached = self._fetch_cache.get(cache_key)
+        if cached is not None:
+            return {**cached, "cached": True, "notice": "相同来源和时间范围已请求过，直接返回上次结果，未重复等待网络。"}
         try:
             if source.url == "demo://broken":
                 raise NewsError("演示来源被配置为故障")
@@ -164,21 +169,33 @@ class NewsRepository:
                 records = [self._normalize(entry, source.name) for entry in entries]
             else:
                 records = self._fetch_feed(source.url, source.name)
-            records = [record for record in records if since_dt <= parse_datetime(record["published_at"]) <= self.now + timedelta(minutes=5)]
+            records = sorted(
+                (record for record in records if since_dt <= parse_datetime(record["published_at"]) <= self.now + timedelta(minutes=5)),
+                key=lambda record: record["published_at"],
+                reverse=True,
+            )[:30]
             self._save(source_id, records)
             self.fetch_successes += 1
-            return {
+            result = {
                 "ok": True,
                 "source_id": source_id,
                 "material_path": f"news/{source_id}.json",
                 "count": len(records),
-                "items": [{"news_id": record["news_id"], "title": record["title"], "published_at": record["published_at"]} for record in records[:20]],
+                "items": [{
+                    "news_id": record["news_id"],
+                    "title": record["title"],
+                    "published_at": record["published_at"],
+                    "summary": record["summary"][:800],
+                } for record in records[:12]],
+                "digest_truncated": len(records) > 12,
             }
+            self._fetch_cache[cache_key] = result
+            return result
         except Exception as exc:
             self.fetch_failures += 1
-            if isinstance(exc, NewsError):
-                raise
-            raise NewsError(f"抓取 {source.name} 失败：{exc}") from exc
+            error = str(exc) if isinstance(exc, NewsError) else f"抓取 {source.name} 失败：{exc}"
+            self._fetch_cache[cache_key] = {"ok": False, "source_id": source_id, "error": error}
+            raise NewsError(error) from exc
 
     def _fetch_feed(self, url: str, source_name: str) -> list[dict]:
         request = urllib.request.Request(url, headers={"User-Agent": "DailyAINewsAgent/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"})

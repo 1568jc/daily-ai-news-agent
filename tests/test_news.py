@@ -65,6 +65,33 @@ class NewsValidationTests(unittest.TestCase):
             self.repository.fetch("demo_broken", isoformat(self.now - timedelta(hours=24)))
         self.assertEqual(self.repository.fetch_failures, 1)
 
+    def test_repeated_fetch_uses_cached_failure_without_retrying_network(self):
+        since = isoformat(self.now - timedelta(hours=24))
+        with self.assertRaises(NewsError):
+            self.repository.fetch("demo_broken", since)
+        repeated = self.repository.fetch("demo_broken", since)
+        self.assertFalse(repeated["ok"])
+        self.assertTrue(repeated["cached"])
+        self.assertEqual(self.repository.fetch_failures, 1)
+
+    def test_fetch_result_contains_summaries_for_direct_selection(self):
+        result = self.repository.fetch("demo_coding", isoformat(self.now - timedelta(hours=24)))
+        self.assertTrue(result["items"][0]["summary"])
+        self.assertIn("news_id", result["items"][0])
+
+    def test_large_feed_is_capped_and_digest_is_compact(self):
+        repository = NewsRepository(self.workspace / "large", self.now, 2, False)
+        records = []
+        for index in range(40):
+            entry = dict(demo_items(self.now)[0])
+            entry["url"] = f"https://example.com/news/{index}"
+            records.append(repository._normalize(entry, "测试来源"))
+        repository._fetch_feed = lambda *_: records
+        result = repository.fetch("openai", isoformat(self.now - timedelta(hours=24)))
+        self.assertEqual(result["count"], 30)
+        self.assertEqual(len(result["items"]), 12)
+        self.assertTrue(result["digest_truncated"])
+
 
 if __name__ == "__main__":
     unittest.main()

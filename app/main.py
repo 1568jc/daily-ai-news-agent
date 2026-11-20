@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import uvicorn
-from fastapi import FastAPI, Form, Request
+from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -75,7 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse("/" + ("?" + urlencode(query) if query else ""), status_code=303)
 
     @application.get("/")
-    def index(request: Request, user_id: str | None = None, new: int = 0, message: str = "", error: str = ""):
+    def index(request: Request, user_id: str | None = None, new: int = 0, watch: int = 0, message: str = "", error: str = ""):
         users = database.list_users()
         selected = database.get_user(user_id) if user_id else (None if new else (users[0] if users else None))
         subscription = database.get_subscription(selected["id"]) if selected else None
@@ -85,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             brief["content"] = json.loads(brief["content_json"]) if brief["content_json"] else None
             brief["run"] = database.get_run(brief["run_id"]) if brief["run_id"] else None
             brief["tool_calls"] = database.list_tool_calls(brief["run_id"]) if brief["run_id"] else []
+        auto_refresh = bool(watch) or any(brief["status"] in {"generating", "pending_delivery", "sending"} for brief in briefs)
         job = scheduler.get_job("daily_ai_news")
         return templates.TemplateResponse(request=request, name="index.html", context={
             "users": users,
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "settings": settings,
             "custom_topics_value": "，".join(topic for topic in (subscription["topics"] if subscription else []) if topic not in TOPICS),
             "next_run": getattr(job, "next_run_time", None),
+            "auto_refresh": auto_refresh,
             "message": message,
             "error": error,
         })
@@ -132,20 +134,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return redirect(user_id, message="订阅已保存")
 
     @application.post("/users/{user_id}/generate")
-    def generate(user_id: str, empty_materials: bool = Form(default=False)):
-        try:
-            brief = service.generate_for_user(user_id, empty_materials=empty_materials and settings.demo_mode)
-            messages = {
-                "delivered": "简报已生成并投递",
-                "preview": "简报已生成；SMTP 未配置，仅预览",
-                "generating": "相同任务正在执行，请稍后刷新",
-                "delivery_failed": "简报已保存，但邮件投递失败，可重试",
-                "source_failed": "新闻来源不可用，未发送无新闻邮件",
-                "failed": "生成失败，请查看错误后重试",
-            }
-            return redirect(user_id, message=messages.get(brief["status"], "任务已处理"))
-        except ValueError as exc:
-            return redirect(user_id, error=str(exc))
+    def generate(user_id: str, background_tasks: BackgroundTasks, empty_materials: bool = Form(default=False)):
+        if not database.get_user(user_id) or not database.get_subscription(user_id):
+            return redirect(user_id, error="用户或订阅不存在")
+        background_tasks.add_task(service.generate_for_user, user_id, empty_materials=empty_materials and settings.demo_mode)
+        return redirect(user_id, message="任务已提交到后台，页面会自动刷新生成状态", watch=1)
 
     @application.post("/users/{user_id}/briefs/{brief_id}/retry")
     def retry_delivery(user_id: str, brief_id: str):
