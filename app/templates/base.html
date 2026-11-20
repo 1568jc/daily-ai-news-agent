@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}每日 AI 新闻助手 Agent{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <a class="brand" href="/">每日 AI 新闻助手</a>
+      <span class="subtitle">Autonomous News Agent</span>
+    </div>
+    {% if settings.demo_mode %}<span class="badge demo">离线演示 · 测试替身</span>{% else %}<span class="badge real">DeepSeek 真实模式</span>{% endif %}
+  </header>
+  <main class="container">
+    {% if message %}<div class="notice success">{{ message }}</div>{% endif %}
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>新闻内容仅作为数据处理 · 定时任务：每天北京时间 {{ '%02d'|format(settings.daily_hour) }}:{{ '%02d'|format(settings.daily_minute) }}</footer>
+</body>
+</html>

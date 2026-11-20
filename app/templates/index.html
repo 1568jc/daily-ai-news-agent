@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">DAILY BRIEFING</p>
+    <h1>让 Agent 决定如何找到你在意的 AI 新闻</h1>
+    <p>RSS / Atom 材料 · 个性化筛选 · 工具轨迹可查验 · 邮件投递</p>
+  </div>
+  {% if settings.demo_mode %}
+  <form method="post" action="/demo/seed">
+    <button class="secondary" type="submit">一键准备三位演示用户</button>
+  </form>
+  {% endif %}
+</section>
+
+<div class="layout">
+  <aside class="panel sidebar">
+    <div class="panel-heading"><h2>用户</h2><a href="/?new=1">+ 新建</a></div>
+    {% if users %}
+      {% for user in users %}
+      <a class="user-link {% if selected and selected.id == user.id %}active{% endif %}" href="/?user_id={{ user.id }}">
+        <span>{{ user.nickname }}</span><small>{{ user.email }}</small>
+      </a>
+      {% endfor %}
+    {% else %}<p class="muted">还没有用户，请从右侧创建订阅。</p>{% endif %}
+    <div class="schedule">
+      <strong>自动任务</strong>
+      <p>每天 {{ '%02d'|format(settings.daily_hour) }}:{{ '%02d'|format(settings.daily_minute) }}（北京时间）</p>
+      {% if next_run %}<small>下次：{{ next_run.isoformat() | beijing_time }}</small>{% endif %}
+    </div>
+  </aside>
+
+  <section class="panel subscription">
+    <div class="panel-heading"><h2>{{ '订阅设置' if selected else '创建用户与订阅' }}</h2>{% if selected %}<span class="muted">ID {{ selected.id[:8] }}</span>{% endif %}</div>
+    <form method="post" action="/subscriptions">
+      {% if selected %}<input type="hidden" name="user_id" value="{{ selected.id }}">{% endif %}
+      <div class="form-grid">
+        <label>昵称<input name="nickname" required maxlength="50" value="{{ selected.nickname if selected else '' }}" placeholder="你的昵称"></label>
+        <label>邮箱<input name="email" type="email" required value="{{ selected.email if selected else '' }}" placeholder="you@example.com"></label>
+      </div>
+      <fieldset>
+        <legend>关注话题</legend>
+        <div class="topic-grid">
+          {% set current_topics = subscription.topics if subscription else [] %}
+          {% for topic in topics %}<label class="check"><input type="checkbox" name="topics" value="{{ topic }}" {% if topic in current_topics %}checked{% endif %}> {{ topic }}</label>{% endfor %}
+        </div>
+      </fieldset>
+      <label>自定义话题 <span class="hint">用逗号分隔，可留空</span>
+        <input name="custom_topics" value="{{ custom_topics_value }}" placeholder="AI 视频，机器人"></label>
+      <label>自定义关键词 <span class="hint">支持中英文，用逗号分隔</span>
+        <input name="keywords" value="{{ subscription.keywords|join('，') if subscription else '' }}" placeholder="MCP，Claude，多模态"></label>
+      <button type="submit">保存订阅</button>
+    </form>
+    {% if selected and subscription %}
+    <hr>
+    <form method="post" action="/users/{{ selected.id }}/generate" class="generate-form">
+      {% if settings.demo_mode %}<label class="check"><input type="checkbox" name="empty_materials" value="true"> 从空 news/ 目录开始（仅新任务生效）</label>{% endif %}
+      <button type="submit">立即生成并{% if settings.smtp_configured %}推送{% else %}预览{% endif %}</button>
+      <small>与每日定时任务复用同一入口；同一天重复触发不会重复生成或投递。</small>
+    </form>
+    {% endif %}
+  </section>
+</div>
+
+{% if selected %}
+<section class="history">
+  <div class="section-heading"><h2>{{ selected.nickname }}的历史简报</h2><span>{{ briefs|length }} 份</span></div>
+  {% if not briefs %}<div class="panel empty">暂无简报。保存订阅后点击“立即生成”。</div>{% endif %}
+  {% for brief in briefs %}
+  <article class="panel brief">
+    <div class="brief-header">
+      <div><p class="eyebrow">{{ brief.brief_date }}</p><h3>每日 AI 新闻简报</h3></div>
+      <span class="status status-{{ brief.status }}">{{ brief.status_label }}</span>
+    </div>
+    <p class="meta">生成：{{ brief.created_at | beijing_time }} · 类型：{{ '无匹配新闻' if brief.kind == 'no_news' else '新闻简报' }}{% if brief.run %} · 模式：{{ '离线测试替身' if brief.run.mode == 'demo' else 'DeepSeek API' }}{% endif %}</p>
+    {% if brief.delivered_at %}<p class="meta">投递：{{ brief.delivered_at | beijing_time }}</p>{% endif %}
+    {% if brief.error %}<div class="notice error">{{ brief.error }}</div>{% endif %}
+    {% if brief.status == 'delivery_failed' %}
+    <form method="post" action="/users/{{ selected.id }}/briefs/{{ brief.id }}/retry"><button type="submit">重试已保存简报的投递</button></form>
+    {% endif %}
+    {% if brief.content %}
+      {% if brief.content.demo_sample %}<div class="sample-label">演示样例 · 非真实新闻</div>{% endif %}
+      {% for item in brief.content["items"] %}
+      <div class="news-item">
+        <h4>{{ loop.index }}. {{ item.title_zh }}</h4>
+        <p><strong>发生了什么：</strong>{{ item.summary }}</p>
+        <p><strong>为什么与你相关：</strong>{{ item.reason }}</p>
+        <p class="meta">{{ item.source }} · {{ item.published_at | beijing_time }} · <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">阅读原文 ↗</a></p>
+      </div>
+      {% else %}<p>{{ brief.content.note }}</p>{% endfor %}
+      {% if brief.content.note and brief.content["items"] %}<p class="note">{{ brief.content.note }}</p>{% endif %}
+      <details>
+        <summary>最终邮件正文预览{% if brief.status == 'preview' %}（仅预览，未发送）{% endif %}</summary>
+        <pre class="email-preview">{{ brief.content_markdown }}</pre>
+      </details>
+    {% endif %}
+    {% if brief.tool_calls %}
+    <details class="trace">
+      <summary>本次工具调用（{{ brief.tool_calls|length }} 次，真实执行记录）</summary>
+      <ol>
+        {% for call in brief.tool_calls %}
+        <li>
+          <div><strong>{{ call.sequence }}. {{ call.tool_name }}</strong><span class="call-result {{ 'ok' if call.ok else 'bad' }}">{{ '成功' if call.ok else '失败' }} · {{ call.duration_ms }} ms</span></div>
+          <code>{{ call.arguments_json }}</code>
+          <pre>{{ call.result_summary }}</pre>
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

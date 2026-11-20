@@ -33,6 +33,7 @@ class AgentRunner:
         self.registry = registry
         self.run_id = run_id
         self.sequence = 0
+        self.rounds = 0
 
     def run(self) -> tuple[str, dict, int]:
         now = utc_now(self.settings)
@@ -44,6 +45,7 @@ class AgentRunner:
         started = time.monotonic()
         rounds = 0
         for rounds in range(1, self.settings.max_rounds + 1):
+            self.rounds = rounds
             if time.monotonic() - started > self.settings.agent_timeout_seconds:
                 raise AgentError("Agent 执行超过配置的超时时间", self._failure_status())
             assistant = self.client.complete(messages, TOOL_SCHEMAS)

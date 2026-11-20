@@ -90,6 +90,27 @@ class BriefServiceTests(unittest.TestCase):
             runs = conn.execute("SELECT COUNT(*) FROM agent_runs WHERE brief_id=?", (failed["id"],)).fetchone()[0]
         self.assertEqual(runs, 1)
 
+    def test_source_failure_does_not_create_or_send_normal_brief(self):
+        class BrokenSourceClient:
+            def __init__(self):
+                self.round = 0
+
+            def complete(self, messages, tools):
+                self.round += 1
+                if self.round > 1:
+                    return {"role": "assistant", "content": "来源失败，无法判断"}
+                return {"role": "assistant", "content": None, "tool_calls": [{"id": "broken-1", "type": "function", "function": {"name": "fetch_news", "arguments": '{"source_id":"demo_broken","since":"2026-01-14T00:00:00+00:00"}'}}]}
+
+        mailer = RecordingMailer()
+        self.service.client_factory = lambda _: BrokenSourceClient()
+        self.service.mailer = mailer
+        user = self._user("故障演练", "broken@example.com", ["AI 研究"])
+        brief = self.service.generate_for_user(user["id"], empty_materials=True)
+        self.assertEqual(brief["status"], "source_failed")
+        self.assertIsNone(brief["content_json"])
+        self.assertEqual(mailer.messages, [])
+        self.assertEqual(self.db.get_run(brief["run_id"])["rounds"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

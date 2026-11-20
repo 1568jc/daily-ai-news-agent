@@ -216,6 +216,10 @@ class Database:
                 (run_id, sequence, name, encoded, summary[:4000], int(ok), duration_ms, now),
             )
 
+    def get_run(self, run_id: str) -> dict | None:
+        with self.connect() as conn:
+            return self._dict(conn.execute("SELECT * FROM agent_runs WHERE id=?", (run_id,)).fetchone())
+
     def list_tool_calls(self, run_id: str) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM tool_calls WHERE run_id=? ORDER BY sequence", (run_id,)).fetchall()

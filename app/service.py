@@ -40,7 +40,7 @@ class BriefService:
                 return self.deliver_existing(brief_id, user_id)
             return brief
         run_id = self.database.create_run(user_id, brief_id, "demo" if self.settings.demo_mode else "deepseek", self._now())
-        rounds = 0
+        runner = None
         try:
             registry = self._prepare_task(run_id, user_id, brief_date, user, subscription, empty_materials)
             client = self.client_factory(self.settings)
@@ -55,10 +55,10 @@ class BriefService:
                 return self.deliver_existing(brief_id, user_id)
             return self.database.get_brief(brief_id)
         except AgentError as exc:
-            self.database.finish_run(run_id, "failed", rounds, self._now(), str(exc))
+            self.database.finish_run(run_id, "failed", runner.rounds if runner else 0, self._now(), str(exc))
             self.database.mark_brief_failed(brief_id, exc.status, str(exc), self._now())
         except Exception as exc:
-            self.database.finish_run(run_id, "failed", rounds, self._now(), str(exc))
+            self.database.finish_run(run_id, "failed", runner.rounds if runner else 0, self._now(), str(exc))
             self.database.mark_brief_failed(brief_id, "failed", str(exc), self._now())
         return self.database.get_brief(brief_id)
 
