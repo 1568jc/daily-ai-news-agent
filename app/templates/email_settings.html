@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}邮件设置 · 每日 AI 新闻助手{% endblock %}
+{% block content %}
+<section class="settings-page panel">
+  <p class="eyebrow">SYSTEM SETTINGS</p>
+  <h1>邮件投递设置</h1>
+  <p class="muted">这是整个系统共用的发件账户，由本地管理员配置。普通用户只需在自己的订阅中填写收件邮箱，不需要接触 SMTP 授权码。</p>
+  <div class="notice {% if email_config.host and email_config.sender %}success{% else %}error{% endif %}">
+    当前状态：{% if email_config.host and email_config.sender %}已配置，将尝试真实投递{% else %}仅预览，不发送邮件{% endif %}
+  </div>
+  <form method="post" action="/email-settings">
+    <div class="form-grid">
+      <label>SMTP 服务器
+        <input name="host" value="{{ email_config.host }}" placeholder="smtp.qq.com" autocomplete="off">
+      </label>
+      <label>端口
+        <input name="port" type="number" min="1" max="65535" value="{{ email_config.port }}" required>
+      </label>
+    </div>
+    <div class="form-grid">
+      <label>登录账号
+        <input name="username" value="{{ email_config.username }}" placeholder="yourname@qq.com" autocomplete="off">
+      </label>
+      <label>发件邮箱
+        <input name="sender" type="email" value="{{ email_config.sender }}" placeholder="yourname@qq.com">
+      </label>
+    </div>
+    <label>SMTP 授权码
+      <input name="password" type="password" value="" placeholder="{% if password_saved %}已保存，留空保持不变{% else %}输入邮箱服务商提供的授权码{% endif %}" autocomplete="new-password">
+    </label>
+    <p class="hint">授权码不会回显，也不会提供给 Agent 或写入工具日志。本地演示保存在 SQLite 中；公网部署应增加管理员鉴权和加密存储。</p>
+    <label class="check tls-check"><input type="checkbox" name="use_tls" value="true" {% if email_config.use_tls %}checked{% endif %}> 使用 STARTTLS（QQ 邮箱通常使用 587 端口）</label>
+    <div class="settings-actions">
+      <button type="submit">保存邮件设置</button>
+      <a href="/">返回用户与简报</a>
+    </div>
+  </form>
+  <div class="config-help">
+    <h3>QQ 邮箱示例</h3>
+    <p>服务器 <code>smtp.qq.com</code>，端口 <code>587</code>，登录账号和发件邮箱填写完整 QQ 邮箱，授权码填写 QQ 邮箱设置中生成的 SMTP 授权码。</p>
+    <p>清空 SMTP 服务器和发件邮箱后保存，即可关闭投递并恢复“仅预览”。</p>
+  </div>
+</section>
+{% endblock %}

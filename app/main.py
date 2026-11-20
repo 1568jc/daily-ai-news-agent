@@ -74,6 +74,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         query = {key: value for key, value in {"user_id": user_id, **message}.items() if value}
         return RedirectResponse("/" + ("?" + urlencode(query) if query else ""), status_code=303)
 
+    def email_redirect(**message) -> RedirectResponse:
+        query = {key: value for key, value in message.items() if value}
+        return RedirectResponse("/email-settings" + ("?" + urlencode(query) if query else ""), status_code=303)
+
+    @application.get("/email-settings")
+    def email_settings_page(request: Request, message: str = "", error: str = ""):
+        config = service.email_config()
+        safe_config = {"host": config.host, "port": config.port, "username": config.username, "sender": config.sender, "use_tls": config.use_tls}
+        return templates.TemplateResponse(request=request, name="email_settings.html", context={
+            "settings": settings,
+            "email_config": safe_config,
+            "password_saved": bool(config.password),
+            "message": message,
+            "error": error,
+        })
+
+    @application.post("/email-settings")
+    def save_email_settings(
+        host: str = Form(default=""),
+        port: int = Form(default=587),
+        username: str = Form(default=""),
+        password: str = Form(default=""),
+        sender: str = Form(default=""),
+        use_tls: bool = Form(default=False),
+    ):
+        host, username, sender = host.strip(), username.strip(), sender.strip()
+        if not 1 <= port <= 65535:
+            return email_redirect(error="SMTP 端口必须在 1～65535 之间")
+        if bool(host) != bool(sender):
+            return email_redirect(error="启用邮件投递时，SMTP 服务器和发件邮箱必须同时填写")
+        if sender and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", sender):
+            return email_redirect(error="请输入有效的发件邮箱")
+        current_password = service.email_config().password
+        password_value = password if password else current_password
+        if not host and not sender:
+            username, password_value = "", ""
+        database.save_email_settings(host, port, username, password_value, sender, use_tls, isoformat(utc_now(settings)))
+        return email_redirect(message="邮件设置已保存并立即生效" if host else "邮件投递已关闭，后续简报将仅预览")
+
     @application.get("/")
     def index(request: Request, user_id: str | None = None, new: int = 0, watch: int = 0, q: str = "", message: str = "", error: str = ""):
         users = database.list_users(q)
@@ -94,6 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "briefs": briefs,
             "topics": TOPICS,
             "settings": settings,
+            "smtp_configured": service.email_config().configured,
             "custom_topics_value": "，".join(topic for topic in (subscription["topics"] if subscription else []) if topic not in TOPICS),
             "next_run": getattr(job, "next_run_time", None),
             "auto_refresh": auto_refresh,

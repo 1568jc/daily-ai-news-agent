@@ -12,7 +12,10 @@
       <a class="brand" href="/">每日 AI 新闻助手</a>
       <span class="subtitle">Autonomous News Agent</span>
     </div>
-    {% if settings.demo_mode %}<span class="badge demo">离线演示 · 测试替身</span>{% else %}<span class="badge real">DeepSeek 真实模式</span>{% endif %}
+    <div class="top-actions">
+      <a class="settings-link" href="/email-settings">邮件设置</a>
+      {% if settings.demo_mode %}<span class="badge demo">离线演示 · 测试替身</span>{% else %}<span class="badge real">DeepSeek 真实模式</span>{% endif %}
+    </div>
   </header>
   <main class="container">
     {% if message %}<div class="notice success">{{ message }}</div>{% endif %}

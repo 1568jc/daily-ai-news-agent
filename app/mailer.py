@@ -1,28 +1,52 @@
 from __future__ import annotations
 
 import smtplib
+from dataclasses import dataclass
 from email.message import EmailMessage
 
 from .config import Settings
 
 
+@dataclass(frozen=True)
+class EmailConfig:
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    sender: str = ""
+    use_tls: bool = True
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.host and self.sender)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "EmailConfig":
+        return cls(settings.smtp_host, settings.smtp_port, settings.smtp_username, settings.smtp_password, settings.smtp_from, settings.smtp_use_tls)
+
+    @classmethod
+    def from_row(cls, row: dict) -> "EmailConfig":
+        return cls(row["host"], row["port"], row["username"], row["password"], row["sender"], bool(row["use_tls"]))
+
+
 class Mailer:
     def __init__(self, settings: Settings):
-        self.settings = settings
+        self.default_config = EmailConfig.from_settings(settings)
 
-    def send(self, recipient: str, subject: str, markdown: str) -> None:
-        if not self.settings.smtp_configured:
+    def send(self, recipient: str, subject: str, markdown: str, config: EmailConfig | None = None) -> None:
+        config = config or self.default_config
+        if not config.configured:
             raise RuntimeError("SMTP 未配置")
         message = EmailMessage()
-        message["From"] = self.settings.smtp_from
+        message["From"] = config.sender
         message["To"] = recipient
         message["Subject"] = subject
         message.set_content(markdown, subtype="plain", charset="utf-8")
-        with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=20) as smtp:
+        with smtplib.SMTP(config.host, config.port, timeout=20) as smtp:
             smtp.ehlo()
-            if self.settings.smtp_use_tls:
+            if config.use_tls:
                 smtp.starttls()
                 smtp.ehlo()
-            if self.settings.smtp_username:
-                smtp.login(self.settings.smtp_username, self.settings.smtp_password)
+            if config.username:
+                smtp.login(config.username, config.password)
             smtp.send_message(message)

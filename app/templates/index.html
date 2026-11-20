@@ -61,7 +61,7 @@
     <hr>
     <form method="post" action="/users/{{ selected.id }}/generate" class="generate-form">
       {% if settings.demo_mode %}<label class="check"><input type="checkbox" name="empty_materials" value="true"> 从空 news/ 目录开始（仅新任务生效）</label>{% endif %}
-      <button type="submit">立即生成并{% if settings.smtp_configured %}推送{% else %}预览{% endif %}</button>
+      <button type="submit">立即生成并{% if smtp_configured %}推送{% else %}预览{% endif %}</button>
       <small>与每日定时任务复用同一入口；同一天重复触发不会重复生成或投递。</small>
     </form>
     <form method="post" action="/users/{{ selected.id }}/delete" class="delete-form" onsubmit="return confirm('确定删除该用户吗？其订阅、历史简报和工具记录将一并删除，且无法恢复。');">
@@ -85,8 +85,8 @@
     <p class="meta">生成：{{ brief.created_at | beijing_time }} · 类型：{{ '无匹配新闻' if brief.kind == 'no_news' else '新闻简报' }}{% if brief.run %} · 模式：{{ '离线测试替身' if brief.run.mode == 'demo' else 'DeepSeek API' }}{% endif %}</p>
     {% if brief.delivered_at %}<p class="meta">投递：{{ brief.delivered_at | beijing_time }}</p>{% endif %}
     {% if brief.error %}<div class="notice error">{{ brief.error }}</div>{% endif %}
-    {% if brief.status == 'delivery_failed' %}
-    <form method="post" action="/users/{{ selected.id }}/briefs/{{ brief.id }}/retry"><button type="submit">重试已保存简报的投递</button></form>
+    {% if brief.status == 'delivery_failed' or (brief.status == 'preview' and smtp_configured) %}
+    <form method="post" action="/users/{{ selected.id }}/briefs/{{ brief.id }}/retry"><button type="submit">{{ '发送此简报' if brief.status == 'preview' else '重试已保存简报的投递' }}</button></form>
     {% endif %}
     {% if brief.content %}
       {% if brief.content.demo_sample %}<div class="sample-label">演示样例 · 非真实新闻</div>{% endif %}

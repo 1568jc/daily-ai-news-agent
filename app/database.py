@@ -63,6 +63,16 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     created_at TEXT NOT NULL,
     UNIQUE(run_id, sequence)
 );
+CREATE TABLE IF NOT EXISTS email_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    host TEXT NOT NULL DEFAULT '',
+    port INTEGER NOT NULL DEFAULT 587,
+    username TEXT NOT NULL DEFAULT '',
+    password TEXT NOT NULL DEFAULT '',
+    sender TEXT NOT NULL DEFAULT '',
+    use_tls INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_briefs_user_date ON briefs(user_id, brief_date DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_run ON tool_calls(run_id, sequence);
 """
@@ -88,6 +98,20 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+
+    def get_email_settings(self) -> dict | None:
+        with self.connect() as conn:
+            return self._dict(conn.execute("SELECT * FROM email_settings WHERE id=1").fetchone())
+
+    def save_email_settings(self, host: str, port: int, username: str, password: str, sender: str, use_tls: bool, now: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO email_settings(id,host,port,username,password,sender,use_tls,updated_at)
+                   VALUES(1,?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET host=excluded.host,port=excluded.port,username=excluded.username,
+                   password=excluded.password,sender=excluded.sender,use_tls=excluded.use_tls,updated_at=excluded.updated_at""",
+                (host, port, username, password, sender, int(use_tls), now),
+            )
 
     @staticmethod
     def _dict(row: sqlite3.Row | None) -> dict | None:
@@ -249,7 +273,7 @@ class Database:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
-                "UPDATE briefs SET status='sending',updated_at=? WHERE id=? AND status IN ('pending_delivery','delivery_failed')",
+                "UPDATE briefs SET status='sending',updated_at=? WHERE id=? AND status IN ('pending_delivery','delivery_failed','preview')",
                 (now, brief_id),
             )
             conn.execute("COMMIT")

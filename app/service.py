@@ -8,7 +8,7 @@ from .config import Settings
 from .database import Database
 from .demo_llm import DemoLLMClient
 from .llm import DeepSeekClient
-from .mailer import Mailer
+from .mailer import EmailConfig, Mailer
 from .news import NewsRepository
 from .render import brief_markdown, brief_subject
 from .sources import sources_as_dicts
@@ -22,6 +22,10 @@ class BriefService:
         self.client_factory = client_factory or (DemoLLMClient if settings.demo_mode else DeepSeekClient)
         self.mailer = mailer or Mailer(settings)
 
+    def email_config(self) -> EmailConfig:
+        stored = self.database.get_email_settings()
+        return EmailConfig.from_row(stored) if stored else EmailConfig.from_settings(self.settings)
+
     def _now(self) -> str:
         return isoformat(utc_now(self.settings))
 
@@ -34,7 +38,7 @@ class BriefService:
         brief_id, should_generate = self.database.reserve_brief(user_id, brief_date, self._now())
         if not should_generate:
             brief = self.database.get_brief(brief_id)
-            if brief["status"] in {"pending_delivery", "delivery_failed"}:
+            if brief["status"] in {"pending_delivery", "delivery_failed"} or (brief["status"] == "preview" and self.email_config().configured):
                 return self.deliver_existing(brief_id, user_id)
             return brief
         run_id = self.database.create_run(user_id, brief_id, "demo" if self.settings.demo_mode else "deepseek", self._now())
@@ -46,7 +50,7 @@ class BriefService:
             kind, content, rounds = runner.run()
             markdown = brief_markdown(content)
             subject = brief_subject(brief_date, content)
-            status = "pending_delivery" if self.settings.smtp_configured else "preview"
+            status = "pending_delivery" if self.email_config().configured else "preview"
             self.database.save_generated_brief(brief_id, kind, content, markdown, subject, status, self._now())
             self.database.finish_run(run_id, "completed", rounds, self._now())
             if status == "pending_delivery":
@@ -86,15 +90,16 @@ class BriefService:
         brief = self.database.get_brief(brief_id, user_id)
         if not brief or not brief["content_markdown"]:
             raise ValueError("简报不存在或尚未成功生成")
-        if brief["status"] in {"delivered", "preview", "sending"}:
+        if brief["status"] in {"delivered", "sending"}:
             return brief
-        if not self.settings.smtp_configured:
+        config = self.email_config()
+        if not config.configured:
             return brief
         if not self.database.claim_delivery(brief_id, self._now()):
             return self.database.get_brief(brief_id)
         user = self.database.get_user(user_id)
         try:
-            self.mailer.send(user["email"], brief["email_subject"], brief["content_markdown"])
+            self.mailer.send(user["email"], brief["email_subject"], brief["content_markdown"], config=config)
             self.database.mark_delivered(brief_id, self._now())
         except Exception as exc:
             self.database.mark_delivery_failed(brief_id, str(exc), self._now())

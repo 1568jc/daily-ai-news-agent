@@ -16,10 +16,10 @@ class RecordingMailer:
         self.fail = fail
         self.messages = []
 
-    def send(self, recipient, subject, markdown):
+    def send(self, recipient, subject, markdown, config=None):
         if self.fail:
             raise RuntimeError("模拟 SMTP 故障")
-        self.messages.append((recipient, subject, markdown))
+        self.messages.append((recipient, subject, markdown, config))
 
 
 class BriefServiceTests(unittest.TestCase):
@@ -110,6 +110,21 @@ class BriefServiceTests(unittest.TestCase):
         self.assertIsNone(brief["content_json"])
         self.assertEqual(mailer.messages, [])
         self.assertEqual(self.db.get_run(brief["run_id"])["rounds"], 2)
+
+    def test_saved_preview_can_be_delivered_after_web_email_configuration(self):
+        mailer = RecordingMailer()
+        self.service = BriefService(self.settings, self.db, mailer=mailer)
+        user = self._user("甲", "coding@example.com", ["AI 编程工具"])
+        preview = self.service.generate_for_user(user["id"])
+        self.assertEqual(preview["status"], "preview")
+        self.db.save_email_settings("smtp.qq.com", 587, "sender@qq.com", "secret", "sender@qq.com", True, "2026-01-15T00:01:00Z")
+        delivered = self.service.generate_for_user(user["id"])
+        self.assertEqual(delivered["status"], "delivered")
+        self.assertEqual(len(mailer.messages), 1)
+        self.assertEqual(mailer.messages[0][3].host, "smtp.qq.com")
+        with self.db.connect() as conn:
+            runs = conn.execute("SELECT COUNT(*) FROM agent_runs WHERE brief_id=?", (preview["id"],)).fetchone()[0]
+        self.assertEqual(runs, 1)
 
 
 if __name__ == "__main__":

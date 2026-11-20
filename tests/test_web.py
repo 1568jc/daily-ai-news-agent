@@ -116,6 +116,22 @@ class WebTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM agent_runs WHERE user_id=?", (user["id"],)).fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM tool_calls WHERE run_id=?", (brief["run_id"],)).fetchone()[0], 0)
 
+    def test_email_settings_are_editable_without_exposing_password(self):
+        secret = "smtp-test-secret"
+        response = self.client.post("/email-settings", data={"host": "smtp.qq.com", "port": "587", "username": "sender@qq.com", "password": secret, "sender": "sender@qq.com", "use_tls": "true"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("设置已保存并立即生效", response.text)
+        self.assertNotIn(secret, response.text)
+        config = self.client.app.state.service.email_config()
+        self.assertTrue(config.configured)
+        self.assertEqual(config.password, secret)
+        response = self.client.post("/email-settings", data={"host": "smtp.qq.com", "port": "587", "username": "new@qq.com", "password": "", "sender": "new@qq.com", "use_tls": "true"}, follow_redirects=True)
+        self.assertNotIn(secret, response.text)
+        self.assertEqual(self.client.app.state.service.email_config().password, secret)
+        self.assertEqual(self.client.app.state.service.email_config().username, "new@qq.com")
+        self.client.post("/email-settings", data={"host": "", "port": "587", "username": "", "password": "", "sender": ""})
+        self.assertFalse(self.client.app.state.service.email_config().configured)
+
 
 if __name__ == "__main__":
     unittest.main()
