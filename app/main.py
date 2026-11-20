@@ -75,9 +75,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse("/" + ("?" + urlencode(query) if query else ""), status_code=303)
 
     @application.get("/")
-    def index(request: Request, user_id: str | None = None, new: int = 0, watch: int = 0, message: str = "", error: str = ""):
-        users = database.list_users()
-        selected = database.get_user(user_id) if user_id else (None if new else (users[0] if users else None))
+    def index(request: Request, user_id: str | None = None, new: int = 0, watch: int = 0, q: str = "", message: str = "", error: str = ""):
+        users = database.list_users(q)
+        selected = database.get_user(user_id) if user_id else (None if new or q else (users[0] if users else None))
         subscription = database.get_subscription(selected["id"]) if selected else None
         briefs = database.list_briefs(selected["id"]) if selected else []
         for brief in briefs:
@@ -97,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "custom_topics_value": "，".join(topic for topic in (subscription["topics"] if subscription else []) if topic not in TOPICS),
             "next_run": getattr(job, "next_run_time", None),
             "auto_refresh": auto_refresh,
+            "q": q,
             "message": message,
             "error": error,
         })
@@ -132,6 +133,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except sqlite3.IntegrityError:
             return redirect(user_id or None, error="该邮箱已绑定其他用户")
         return redirect(user_id, message="订阅已保存")
+
+    @application.post("/users/{user_id}/delete")
+    def delete_user(user_id: str):
+        if not database.get_user(user_id):
+            return redirect(error="用户不存在或已删除")
+        if any(brief["status"] in {"generating", "pending_delivery", "sending"} for brief in database.list_briefs(user_id)):
+            return redirect(user_id, error="该用户仍有生成或投递任务，请完成后再删除")
+        database.delete_user(user_id)
+        return redirect(message="用户及其订阅、历史简报和工具记录已删除")
 
     @application.post("/users/{user_id}/generate")
     def generate(user_id: str, background_tasks: BackgroundTasks, empty_materials: bool = Form(default=False)):

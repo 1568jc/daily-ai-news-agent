@@ -68,6 +68,53 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("setTimeout", response.text)
         self.assertIn("生成中", response.text)
+        response = self.client.post(f"/users/{user['id']}/delete", follow_redirects=True)
+        self.assertIn("仍有生成或投递任务", response.text)
+        self.assertIsNotNone(database.get_user(user["id"]))
+
+    def test_query_users_by_nickname_or_email(self):
+        database = self.client.app.state.database
+        database.create_user("Alice", "alice@example.com", "2026-01-15T00:00:00Z")
+        database.create_user("Bob", "bob@example.com", "2026-01-15T00:00:00Z")
+        response = self.client.get("/?q=ALI")
+        self.assertIn("Alice", response.text)
+        self.assertNotIn("Bob", response.text)
+        response = self.client.get("/?q=bob%40example.com")
+        self.assertIn("Bob", response.text)
+        self.assertNotIn("Alice", response.text)
+        response = self.client.get("/?q=nobody")
+        self.assertIn("未找到匹配", response.text)
+
+    def test_update_user_and_subscription(self):
+        database = self.client.app.state.database
+        user = database.create_user("旧昵称", "old@example.com", "2026-01-15T00:00:00Z")
+        database.save_subscription(user["id"], ["AI 研究"], ["论文"], "2026-01-15T00:00:00Z")
+        response = self.client.post("/subscriptions", data={"user_id": user["id"], "nickname": "新昵称", "email": "new@example.com", "topics": ["AI 编程工具"], "custom_topics": "机器人", "keywords": "MCP，Claude"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        updated = database.get_user(user["id"])
+        subscription = database.get_subscription(user["id"])
+        self.assertEqual(updated["nickname"], "新昵称")
+        self.assertEqual(updated["email"], "new@example.com")
+        self.assertEqual(subscription["topics"], ["AI 编程工具", "机器人"])
+        self.assertEqual(subscription["keywords"], ["MCP", "Claude"])
+        self.assertIn("保存用户修改", response.text)
+
+    def test_delete_user_cascades_subscription_briefs_and_tool_records(self):
+        database = self.client.app.state.database
+        user = database.create_user("待删除", "delete@example.com", "2026-01-15T00:00:00Z")
+        database.save_subscription(user["id"], ["AI 编程工具"], [], "2026-01-15T00:00:00Z")
+        self.client.post(f"/users/{user['id']}/generate")
+        brief = database.list_briefs(user["id"])[0]
+        self.assertTrue(database.list_tool_calls(brief["run_id"]))
+        response = self.client.post(f"/users/{user['id']}/delete", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("已删除", response.text)
+        self.assertIsNone(database.get_user(user["id"]))
+        self.assertIsNone(database.get_subscription(user["id"]))
+        self.assertEqual(database.list_briefs(user["id"]), [])
+        with database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM agent_runs WHERE user_id=?", (user["id"],)).fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM tool_calls WHERE run_id=?", (brief["run_id"],)).fetchone()[0], 0)
 
 
 if __name__ == "__main__":

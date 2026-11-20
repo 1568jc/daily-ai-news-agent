@@ -113,15 +113,23 @@ class Database:
         with self.connect() as conn:
             return self._dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
 
-    def list_users(self) -> list[dict]:
+    def list_users(self, query: str = "") -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM users ORDER BY created_at").fetchall()
+        needle = query.strip().casefold()
         users = []
         for row in rows:
             user = dict(row)
+            if needle and needle not in user["nickname"].casefold() and needle not in user["email"].casefold():
+                continue
             user["subscription"] = self.get_subscription(user["id"])
             users.append(user)
         return users
+
+    def delete_user(self, user_id: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+            return cursor.rowcount == 1
 
     def save_subscription(self, user_id: str, topics: list[str], keywords: list[str], now: str) -> None:
         with self.connect() as conn:

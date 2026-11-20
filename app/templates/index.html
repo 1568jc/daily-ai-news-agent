@@ -15,14 +15,20 @@
 
 <div class="layout">
   <aside class="panel sidebar">
-    <div class="panel-heading"><h2>用户</h2><a href="/?new=1">+ 新建</a></div>
+    <div class="panel-heading"><h2>用户管理</h2><a href="/?new=1">+ 新建</a></div>
+    <form class="user-search" method="get" action="/">
+      {% if selected %}<input type="hidden" name="user_id" value="{{ selected.id }}">{% endif %}
+      <input name="q" value="{{ q }}" placeholder="按昵称或邮箱查询" aria-label="查询用户">
+      <button class="secondary" type="submit">查询</button>
+      {% if q %}<a href="/?user_id={{ selected.id if selected else '' }}">清除</a>{% endif %}
+    </form>
     {% if users %}
       {% for user in users %}
       <a class="user-link {% if selected and selected.id == user.id %}active{% endif %}" href="/?user_id={{ user.id }}">
         <span>{{ user.nickname }}</span><small>{{ user.email }}</small>
       </a>
       {% endfor %}
-    {% else %}<p class="muted">还没有用户，请从右侧创建订阅。</p>{% endif %}
+    {% elif q %}<p class="muted">未找到匹配“{{ q }}”的用户。</p>{% else %}<p class="muted">还没有用户，请从右侧创建订阅。</p>{% endif %}
     <div class="schedule">
       <strong>自动任务</strong>
       <p>每天 {{ '%02d'|format(settings.daily_hour) }}:{{ '%02d'|format(settings.daily_minute) }}（北京时间）</p>
@@ -31,7 +37,7 @@
   </aside>
 
   <section class="panel subscription">
-    <div class="panel-heading"><h2>{{ '订阅设置' if selected else '创建用户与订阅' }}</h2>{% if selected %}<span class="muted">ID {{ selected.id[:8] }}</span>{% endif %}</div>
+    <div class="panel-heading"><h2>{{ '修改用户与订阅' if selected else '创建用户与订阅' }}</h2>{% if selected %}<span class="muted">ID {{ selected.id[:8] }}</span>{% endif %}</div>
     <form method="post" action="/subscriptions">
       {% if selected %}<input type="hidden" name="user_id" value="{{ selected.id }}">{% endif %}
       <div class="form-grid">
@@ -49,7 +55,7 @@
         <input name="custom_topics" value="{{ custom_topics_value }}" placeholder="AI 视频，机器人"></label>
       <label>自定义关键词 <span class="hint">支持中英文，用逗号分隔</span>
         <input name="keywords" value="{{ subscription.keywords|join('，') if subscription else '' }}" placeholder="MCP，Claude，多模态"></label>
-      <button type="submit">保存订阅</button>
+      <button type="submit">{{ '保存用户修改' if selected else '创建用户并保存订阅' }}</button>
     </form>
     {% if selected and subscription %}
     <hr>
@@ -57,6 +63,10 @@
       {% if settings.demo_mode %}<label class="check"><input type="checkbox" name="empty_materials" value="true"> 从空 news/ 目录开始（仅新任务生效）</label>{% endif %}
       <button type="submit">立即生成并{% if settings.smtp_configured %}推送{% else %}预览{% endif %}</button>
       <small>与每日定时任务复用同一入口；同一天重复触发不会重复生成或投递。</small>
+    </form>
+    <form method="post" action="/users/{{ selected.id }}/delete" class="delete-form" onsubmit="return confirm('确定删除该用户吗？其订阅、历史简报和工具记录将一并删除，且无法恢复。');">
+      <button class="danger" type="submit">删除用户</button>
+      <small>删除后无法恢复；生成或投递中的用户需等待任务结束。</small>
     </form>
     {% endif %}
   </section>
