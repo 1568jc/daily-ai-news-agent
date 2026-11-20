@@ -126,6 +126,36 @@ class BriefServiceTests(unittest.TestCase):
             runs = conn.execute("SELECT COUNT(*) FROM agent_runs WHERE brief_id=?", (preview["id"],)).fetchone()[0]
         self.assertEqual(runs, 1)
 
+    def test_force_regeneration_preserves_previous_version_and_tool_trace(self):
+        user = self._user("甲", "coding@example.com", ["AI 编程工具"])
+        first = self.service.generate_for_user(user["id"])
+        old_run = first["run_id"]
+        old_content = first["content_json"]
+        second = self.service.generate_for_user(user["id"], force=True)
+        self.assertEqual(second["id"], first["id"])
+        self.assertNotEqual(second["run_id"], old_run)
+        versions = self.db.list_brief_versions(first["id"])
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(versions[0]["run_id"], old_run)
+        self.assertEqual(versions[0]["content_json"], old_content)
+        self.assertTrue(self.db.list_tool_calls(old_run))
+        self.assertEqual(self.db.get_run(second["run_id"])["status"], "completed")
+
+    def test_explicit_resend_sends_same_brief_without_new_agent_run(self):
+        mailer = RecordingMailer()
+        self.service = BriefService(self.settings, self.db, mailer=mailer)
+        self.db.save_email_settings("smtp.qq.com", 587, "sender@qq.com", "secret", "sender@qq.com", True, "2026-01-15T00:00:00Z")
+        user = self._user("甲", "coding@example.com", ["AI 编程工具"])
+        delivered = self.service.generate_for_user(user["id"])
+        self.assertEqual(delivered["status"], "delivered")
+        self.service.deliver_existing(delivered["id"], user["id"])
+        self.assertEqual(len(mailer.messages), 1)
+        resent = self.service.deliver_existing(delivered["id"], user["id"], resend=True)
+        self.assertEqual(resent["status"], "delivered")
+        self.assertEqual(len(mailer.messages), 2)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM agent_runs WHERE brief_id=?", (delivered["id"],)).fetchone()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

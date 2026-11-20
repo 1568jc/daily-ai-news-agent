@@ -39,9 +39,10 @@ macOS / Linux 将虚拟环境 Python 路径换成 `.venv/bin/python`，并用 `c
 
 ### 场景 C：重复触发与异常
 
-1. 对同一用户连续点击“立即生成并预览”：数据库以“用户 + 北京日期”唯一约束复用同一份简报，不重复运行或投递。
-2. 未配置 SMTP 时明确显示“仅预览”，不会标记为已发送。
-3. 运行下面的离线异常测试：来源失败不会产生“今日无新闻”的正常简报；SMTP 失败会保留正文，重试只发送已有简报，不重新运行 Agent。
+1. 对同一用户连续点击“立即生成并预览”：数据库以“用户 + 北京日期”唯一约束复用同一份简报，页面明确提示重复操作，不重复运行或投递。
+2. 需要新内容时使用“重新生成并预览/推送”：手动确认后启动新 Agent 任务，旧正文、运行 ID 和工具记录保存在可展开的历史版本中。
+3. 需要重发同一邮件时使用“再次发送此简报”：只投递当前内容，不重新运行 Agent。未配置 SMTP 时明确显示“仅预览”，不会标记为已发送。
+4. 运行下面的离线异常测试：来源失败不会产生“今日无新闻”的正常简报；SMTP 失败会保留正文，重试只发送已有简报，不重新运行 Agent。
 
 ```powershell
 .venv\Scripts\python -m unittest tests.test_service.BriefServiceTests.test_source_failure_does_not_create_or_send_normal_brief tests.test_service.BriefServiceTests.test_delivery_failure_retries_saved_brief_without_regenerating tests.test_web.WebTests.test_source_failure_is_shown_without_email_preview -v

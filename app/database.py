@@ -63,6 +63,21 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     created_at TEXT NOT NULL,
     UNIQUE(run_id, sequence)
 );
+CREATE TABLE IF NOT EXISTS brief_versions (
+    id TEXT PRIMARY KEY,
+    brief_id TEXT NOT NULL REFERENCES briefs(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    run_id TEXT,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    content_markdown TEXT NOT NULL,
+    email_subject TEXT,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    saved_at TEXT NOT NULL,
+    UNIQUE(brief_id, version)
+);
 CREATE TABLE IF NOT EXISTS email_settings (
     id INTEGER PRIMARY KEY CHECK(id=1),
     host TEXT NOT NULL DEFAULT '',
@@ -196,11 +211,16 @@ class Database:
             rows = conn.execute("SELECT * FROM briefs WHERE user_id=? ORDER BY brief_date DESC,created_at DESC LIMIT ?", (user_id, limit)).fetchall()
         return [dict(row) for row in rows]
 
-    def reserve_brief(self, user_id: str, brief_date: str, now: str) -> tuple[str, bool]:
+    def list_brief_versions(self, brief_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM brief_versions WHERE brief_id=? ORDER BY version DESC", (brief_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def reserve_brief(self, user_id: str, brief_date: str, now: str, force: bool = False) -> tuple[str, bool]:
         brief_id = uuid.uuid4().hex
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            existing = conn.execute("SELECT id,status FROM briefs WHERE user_id=? AND brief_date=?", (user_id, brief_date)).fetchone()
+            existing = conn.execute("SELECT * FROM briefs WHERE user_id=? AND brief_date=?", (user_id, brief_date)).fetchone()
             if existing is None:
                 conn.execute(
                     "INSERT INTO briefs(id,user_id,brief_date,status,created_at,updated_at) VALUES(?,?,?,'generating',?,?)",
@@ -208,6 +228,24 @@ class Database:
                 )
                 conn.execute("COMMIT")
                 return brief_id, True
+            if existing["status"] in {"generating", "pending_delivery", "sending"}:
+                conn.execute("COMMIT")
+                return existing["id"], False
+            if force:
+                if existing["content_json"]:
+                    version = conn.execute("SELECT COALESCE(MAX(version),0)+1 FROM brief_versions WHERE brief_id=?", (existing["id"],)).fetchone()[0]
+                    conn.execute(
+                        """INSERT INTO brief_versions(id,brief_id,version,run_id,kind,status,content_json,content_markdown,email_subject,created_at,delivered_at,saved_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (uuid.uuid4().hex, existing["id"], version, existing["run_id"], existing["kind"], existing["status"], existing["content_json"], existing["content_markdown"], existing["email_subject"], existing["created_at"], existing["delivered_at"], now),
+                    )
+                conn.execute(
+                    """UPDATE briefs SET status='generating',error=NULL,run_id=NULL,kind='news',content_json=NULL,content_markdown=NULL,
+                       email_subject=NULL,delivered_at=NULL,created_at=?,updated_at=? WHERE id=?""",
+                    (now, now, existing["id"]),
+                )
+                conn.execute("COMMIT")
+                return existing["id"], True
             if existing["status"] in {"failed", "source_failed"}:
                 conn.execute(
                     "UPDATE briefs SET status='generating',error=NULL,run_id=NULL,content_json=NULL,content_markdown=NULL,updated_at=? WHERE id=?",
@@ -276,6 +314,13 @@ class Database:
                 "UPDATE briefs SET status='sending',updated_at=? WHERE id=? AND status IN ('pending_delivery','delivery_failed','preview')",
                 (now, brief_id),
             )
+            conn.execute("COMMIT")
+            return cursor.rowcount == 1
+
+    def claim_resend(self, brief_id: str, now: str) -> bool:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute("UPDATE briefs SET status='sending',updated_at=? WHERE id=? AND status='delivered'", (now, brief_id))
             conn.execute("COMMIT")
             return cursor.rowcount == 1
 

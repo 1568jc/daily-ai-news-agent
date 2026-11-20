@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .clock import BEIJING, isoformat, utc_now
+from .clock import BEIJING, beijing_date, isoformat, utc_now
 from .config import BASE_DIR, Settings, get_settings
 from .database import Database
 from .scheduler import create_scheduler
@@ -124,6 +124,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             brief["content"] = json.loads(brief["content_json"]) if brief["content_json"] else None
             brief["run"] = database.get_run(brief["run_id"]) if brief["run_id"] else None
             brief["tool_calls"] = database.list_tool_calls(brief["run_id"]) if brief["run_id"] else []
+            brief["versions"] = database.list_brief_versions(brief["id"])
+            for version in brief["versions"]:
+                version["status_label"] = STATUS_LABELS.get(version["status"], version["status"])
+                version["run"] = database.get_run(version["run_id"]) if version["run_id"] else None
+                version["tool_calls"] = database.list_tool_calls(version["run_id"]) if version["run_id"] else []
         auto_refresh = bool(watch) or any(brief["status"] in {"generating", "pending_delivery", "sending"} for brief in briefs)
         job = scheduler.get_job("daily_ai_news")
         return templates.TemplateResponse(request=request, name="index.html", context={
@@ -187,8 +192,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def generate(user_id: str, background_tasks: BackgroundTasks, empty_materials: bool = Form(default=False)):
         if not database.get_user(user_id) or not database.get_subscription(user_id):
             return redirect(user_id, error="用户或订阅不存在")
+        existing = database.find_brief(user_id, beijing_date(settings))
+        if existing:
+            status = existing["status"]
+            if status == "delivered":
+                return redirect(user_id, message="今日简报已生成并投递，本次未重复执行。需要新内容请使用“重新生成”，需要同一邮件请使用“再次发送”。")
+            if status == "preview" and not service.email_config().configured:
+                return redirect(user_id, message="今日简报已生成，当前为仅预览，本次未重复生成。需要新内容请使用“重新生成”。")
+            if status in {"generating", "pending_delivery", "sending"}:
+                return redirect(user_id, message="今日任务正在生成或投递，无需重复点击", watch=1)
+            if status == "preview":
+                message = "今日简报已生成，将投递已有简报，不重新生成"
+            elif status == "delivery_failed":
+                message = "将重试已有简报的投递，不重新生成"
+            else:
+                message = "已提交失败任务的重新执行"
+        else:
+            message = "任务已提交到后台，页面会自动刷新生成状态"
         background_tasks.add_task(service.generate_for_user, user_id, empty_materials=empty_materials and settings.demo_mode)
-        return redirect(user_id, message="任务已提交到后台，页面会自动刷新生成状态", watch=1)
+        return redirect(user_id, message=message, watch=1)
+
+    @application.post("/users/{user_id}/regenerate")
+    def regenerate(user_id: str, background_tasks: BackgroundTasks, empty_materials: bool = Form(default=False)):
+        if not database.get_user(user_id) or not database.get_subscription(user_id):
+            return redirect(user_id, error="用户或订阅不存在")
+        existing = database.find_brief(user_id, beijing_date(settings))
+        if existing and existing["status"] in {"generating", "pending_delivery", "sending"}:
+            return redirect(user_id, error="当前任务尚未结束，不能同时重新生成", watch=1)
+        background_tasks.add_task(service.generate_for_user, user_id, empty_materials=empty_materials and settings.demo_mode, force=True)
+        return redirect(user_id, message="已提交重新生成任务；旧简报会保存为历史版本", watch=1)
 
     @application.post("/users/{user_id}/briefs/{brief_id}/retry")
     def retry_delivery(user_id: str, brief_id: str):
@@ -197,6 +229,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return redirect(user_id, message="邮件已投递" if brief["status"] == "delivered" else "尚未投递，请检查状态和 SMTP 配置")
         except ValueError as exc:
             return redirect(user_id, error=str(exc))
+
+    @application.post("/users/{user_id}/briefs/{brief_id}/resend")
+    def resend_delivery(user_id: str, brief_id: str, background_tasks: BackgroundTasks):
+        brief = database.get_brief(brief_id, user_id)
+        if not brief or brief["status"] != "delivered":
+            return redirect(user_id, error="只有已投递的简报可以再次发送")
+        if not service.email_config().configured:
+            return redirect(user_id, error="请先在邮件设置中配置 SMTP")
+        background_tasks.add_task(service.deliver_existing, brief_id, user_id, resend=True)
+        return redirect(user_id, message="已提交重发请求，将再次发送同一简报，不重新生成", watch=1)
 
     @application.post("/demo/seed")
     def seed_demo():

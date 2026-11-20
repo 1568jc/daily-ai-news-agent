@@ -132,6 +132,49 @@ class WebTests(unittest.TestCase):
         self.client.post("/email-settings", data={"host": "", "port": "587", "username": "", "password": "", "sender": ""})
         self.assertFalse(self.client.app.state.service.email_config().configured)
 
+    def test_duplicate_feedback_and_force_regeneration_history(self):
+        database = self.client.app.state.database
+        user = database.create_user("重复测试", "repeat@example.com", "2026-01-15T00:00:00Z")
+        database.save_subscription(user["id"], ["AI 编程工具"], [], "2026-01-15T00:00:00Z")
+        self.client.post(f"/users/{user['id']}/generate")
+        first = database.list_briefs(user["id"])[0]
+        response = self.client.post(f"/users/{user['id']}/generate", follow_redirects=True)
+        self.assertIn("今日简报已生成", response.text)
+        self.assertIn("未重复生成", response.text)
+        self.assertIn("重新生成并预览", response.text)
+        response = self.client.post(f"/users/{user['id']}/regenerate", follow_redirects=True)
+        self.assertIn("历史版本", response.text)
+        current = database.list_briefs(user["id"])[0]
+        self.assertNotEqual(current["run_id"], first["run_id"])
+        versions = database.list_brief_versions(first["id"])
+        self.assertEqual(len(versions), 1)
+        self.assertTrue(database.list_tool_calls(first["run_id"]))
+
+    def test_delivered_duplicate_and_explicit_resend_have_distinct_feedback(self):
+        class SuccessfulMailer:
+            def __init__(self):
+                self.messages = []
+
+            def send(self, recipient, subject, markdown, config=None):
+                self.messages.append(markdown)
+
+        database = self.client.app.state.database
+        mailer = SuccessfulMailer()
+        self.client.app.state.service.mailer = mailer
+        database.save_email_settings("smtp.qq.com", 587, "sender@qq.com", "secret", "sender@qq.com", True, "2026-01-15T00:00:00Z")
+        user = database.create_user("重发测试", "resend@example.com", "2026-01-15T00:00:00Z")
+        database.save_subscription(user["id"], ["AI 编程工具"], [], "2026-01-15T00:00:00Z")
+        self.client.post(f"/users/{user['id']}/generate")
+        brief = database.list_briefs(user["id"])[0]
+        self.assertEqual(brief["status"], "delivered")
+        response = self.client.post(f"/users/{user['id']}/generate", follow_redirects=True)
+        self.assertIn("已生成并投递", response.text)
+        self.assertIn("未重复执行", response.text)
+        self.assertEqual(len(mailer.messages), 1)
+        response = self.client.post(f"/users/{user['id']}/briefs/{brief['id']}/resend", follow_redirects=True)
+        self.assertIn("再次发送同一简报", response.text)
+        self.assertEqual(len(mailer.messages), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

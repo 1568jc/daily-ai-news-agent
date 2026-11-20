@@ -29,13 +29,13 @@ class BriefService:
     def _now(self) -> str:
         return isoformat(utc_now(self.settings))
 
-    def generate_for_user(self, user_id: str, empty_materials: bool = False) -> dict:
+    def generate_for_user(self, user_id: str, empty_materials: bool = False, force: bool = False) -> dict:
         user = self.database.get_user(user_id)
         subscription = self.database.get_subscription(user_id)
         if not user or not subscription:
             raise ValueError("用户或订阅不存在")
         brief_date = beijing_date(self.settings)
-        brief_id, should_generate = self.database.reserve_brief(user_id, brief_date, self._now())
+        brief_id, should_generate = self.database.reserve_brief(user_id, brief_date, self._now(), force=force)
         if not should_generate:
             brief = self.database.get_brief(brief_id)
             if brief["status"] in {"pending_delivery", "delivery_failed"} or (brief["status"] == "preview" and self.email_config().configured):
@@ -86,16 +86,21 @@ class BriefService:
             repository.preload_demo()
         return ToolRegistry(workspace, repository)
 
-    def deliver_existing(self, brief_id: str, user_id: str) -> dict:
+    def deliver_existing(self, brief_id: str, user_id: str, resend: bool = False) -> dict:
         brief = self.database.get_brief(brief_id, user_id)
         if not brief or not brief["content_markdown"]:
             raise ValueError("简报不存在或尚未成功生成")
-        if brief["status"] in {"delivered", "sending"}:
+        if brief["status"] == "sending":
+            return brief
+        if resend and brief["status"] != "delivered":
+            raise ValueError("只有已投递的简报可以手动重发")
+        if not resend and brief["status"] == "delivered":
             return brief
         config = self.email_config()
         if not config.configured:
             return brief
-        if not self.database.claim_delivery(brief_id, self._now()):
+        claimed = self.database.claim_resend(brief_id, self._now()) if resend else self.database.claim_delivery(brief_id, self._now())
+        if not claimed:
             return self.database.get_brief(brief_id)
         user = self.database.get_user(user_id)
         try:
