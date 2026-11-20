@@ -78,7 +78,7 @@
 </div>
 
 {% if selected %}
-<section class="history">
+<section class="history" id="history" data-run-id="{{ briefs[0].run_id if briefs and briefs[0].run_id else '' }}" data-tool-count="{{ briefs[0].tool_calls|length if briefs else 0 }}">
   <div class="section-heading"><h2>{{ selected.nickname }}的历史简报</h2><span>{{ briefs|length }} 份</span></div>
   {% if not briefs %}<div class="panel empty">暂无简报。保存订阅后点击“立即生成”。</div>{% endif %}
   {% for brief in briefs %}
@@ -150,6 +150,88 @@
 </section>
 {% endif %}
 {% if auto_refresh and selected %}
-<script>setTimeout(function () { window.location.href = "/?user_id={{ selected.id }}"; }, 4000);</script>
+<script>
+const userId = "{{ selected.id }}";
+let historyPanel = document.getElementById("history");
+let runId = historyPanel.dataset.runId || "";
+let toolCount = Number(historyPanel.dataset.toolCount || 0);
+let missingPolls = 0;
+
+async function updateHistory() {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const response = await fetch("/?user_id=" + encodeURIComponent(userId), {cache: "no-store"});
+  if (!response.ok) throw new Error("history refresh failed");
+  const documentCopy = new DOMParser().parseFromString(await response.text(), "text/html");
+  const freshPanel = documentCopy.getElementById("history");
+  if (!freshPanel) return;
+  historyPanel.replaceWith(freshPanel);
+  historyPanel = freshPanel;
+  runId = historyPanel.dataset.runId || "";
+  toolCount = Number(historyPanel.dataset.toolCount || 0);
+  window.scrollTo(scrollX, scrollY);
+}
+
+async function updateTools(tools) {
+  const trace = historyPanel.querySelector(".brief .trace");
+  if (!trace) {
+    if (tools.length) await updateHistory();
+    return;
+  }
+  const summary = trace.querySelector("summary");
+  summary.textContent = "本次工具调用（" + tools.length + " 次，真实执行记录）";
+  const items = tools.map(function (call) {
+    const item = document.createElement("li");
+    const header = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = call.sequence + ". " + call.name;
+    const result = document.createElement("span");
+    result.className = "call-result " + (call.ok ? "ok" : "bad");
+    result.textContent = (call.ok ? "成功" : "失败") + " · " + call.duration_ms + " ms";
+    const argumentsBlock = document.createElement("code");
+    argumentsBlock.textContent = call.arguments;
+    const resultBlock = document.createElement("pre");
+    resultBlock.textContent = call.result;
+    header.append(name, result);
+    item.append(header, argumentsBlock, resultBlock);
+    return item;
+  });
+  trace.querySelector("ol").replaceChildren(...items);
+  toolCount = tools.length;
+}
+
+function schedulePoll() {
+  setTimeout(pollGenerationStatus, 2500);
+}
+
+async function pollGenerationStatus() {
+  try {
+    const response = await fetch("/users/" + encodeURIComponent(userId) + "/generation-status", {cache: "no-store"});
+    if (!response.ok) throw new Error("status request failed");
+    const data = await response.json();
+    if (!data.exists) {
+      missingPolls += 1;
+      if (missingPolls < 30) schedulePoll();
+      return;
+    }
+    missingPolls = 0;
+    if (data.run_id !== runId || !data.active) {
+      await updateHistory();
+    } else {
+      const badge = historyPanel.querySelector(".brief .status");
+      if (badge) {
+        badge.className = "status status-" + data.status;
+        badge.textContent = data.status_label;
+      }
+      if (data.tool_count !== toolCount) await updateTools(data.tools);
+    }
+    if (data.active) schedulePoll();
+  } catch (error) {
+    schedulePoll();
+  }
+}
+
+schedulePoll();
+</script>
 {% endif %}
 {% endblock %}

@@ -240,6 +240,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         background_tasks.add_task(service.deliver_existing, brief_id, user_id, resend=True)
         return redirect(user_id, message="已提交重发请求，将再次发送同一简报，不重新生成", watch=1)
 
+    @application.get("/users/{user_id}/generation-status")
+    def generation_status(user_id: str):
+        brief = database.find_brief(user_id, beijing_date(settings))
+        if not brief:
+            return {"exists": False, "active": False}
+        calls = database.list_tool_calls(brief["run_id"]) if brief["run_id"] else []
+        return {
+            "exists": True,
+            "active": brief["status"] in {"generating", "pending_delivery", "sending"},
+            "status": brief["status"],
+            "status_label": STATUS_LABELS.get(brief["status"], brief["status"]),
+            "run_id": brief["run_id"],
+            "tool_count": len(calls),
+            "tools": [{"sequence": call["sequence"], "name": call["tool_name"], "arguments": call["arguments_json"], "result": call["result_summary"], "ok": bool(call["ok"]), "duration_ms": call["duration_ms"]} for call in calls],
+            "updated_at": brief["updated_at"],
+        }
+
     @application.post("/demo/seed")
     def seed_demo():
         if not settings.demo_mode:
