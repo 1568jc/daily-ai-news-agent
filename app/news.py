@@ -171,12 +171,13 @@ class NewsRepository:
                 records = [self._normalize(entry, source.name) for entry in entries]
             else:
                 records = self._fetch_feed(source.url, source.name)
-            records = sorted(
-                (record for record in records if since_dt <= parse_datetime(record["published_at"]) <= self.now + timedelta(minutes=5)),
+            recent_records = sorted(
+                (record for record in records if self.now - timedelta(days=7) <= parse_datetime(record["published_at"]) <= self.now + timedelta(minutes=5)),
                 key=lambda record: record["published_at"],
                 reverse=True,
             )[:30]
-            self._save(source_id, records)
+            records = [record for record in recent_records if since_dt <= parse_datetime(record["published_at"])]
+            self._save(source_id, recent_records)
             self.fetch_successes += 1
             result = {
                 "ok": True,
@@ -190,6 +191,14 @@ class NewsRepository:
                     "summary": record["summary"][:800],
                 } for record in records[:12]],
                 "digest_truncated": len(records) > 12,
+                "recent_count": len(recent_records),
+                "recent_items": [] if records else [{
+                    "news_id": record["news_id"],
+                    "title": record["title"],
+                    "published_at": record["published_at"],
+                    "summary": record["summary"][:800],
+                } for record in recent_records[:12]],
+                "recent_digest_truncated": len(recent_records) > 12,
             }
             self._fetch_cache[cache_key] = result
             return result
@@ -249,15 +258,31 @@ class NewsRepository:
             if start <= parse_datetime(record["published_at"]) <= end
         }
 
-    def validate_submission(self, items: object, note: object = "") -> tuple[str, dict]:
+    def recent_records(self) -> dict[str, dict]:
+        start = self.now - timedelta(days=7)
+        end = self.now + timedelta(minutes=5)
+        return {
+            identifier: record
+            for identifier, record in self.records.items()
+            if start <= parse_datetime(record["published_at"]) <= end
+        }
+
+    def validate_submission(self, items: object, note: object = "", recent_fallback: bool = False) -> tuple[str, dict]:
         if not isinstance(items, list):
             raise NewsError("items 必须是数组")
         if len(items) > 5:
             raise NewsError("每份简报最多 5 条新闻")
         if not isinstance(note, str):
             raise NewsError("note 必须是字符串")
+        if not isinstance(recent_fallback, bool):
+            raise NewsError("recent_fallback 必须是布尔值")
         eligible = self.eligible_records()
-        if not items and not eligible and self.fetch_successes == 0:
+        if recent_fallback and eligible:
+            raise NewsError("仍有过去 24 小时内的新闻，不能使用近期补充模式")
+        content_window = "recent_7d" if recent_fallback else "24h"
+        if recent_fallback:
+            eligible = self.recent_records()
+        if not items and not eligible and self.fetch_successes == 0 and not self.records:
             raise NewsError("尚无成功获取的来源材料，无法判断今天有没有新闻；请抓取来源或修复抓取错误")
         selected = []
         seen_urls = set()
@@ -272,7 +297,8 @@ class NewsRepository:
             record = eligible.get(identifier)
             if record is None:
                 if identifier in self.records:
-                    raise NewsError(f"第 {index} 条 {identifier} 不在过去 24 小时时间窗口内")
+                    window_label = "最近 7 天" if recent_fallback else "过去 24 小时"
+                    raise NewsError(f"第 {index} 条 {identifier} 不在{window_label}时间窗口内")
                 raise NewsError(f"第 {index} 条包含未知新闻 ID：{identifier}；只能从实际材料中选择")
             if record["url"] in seen_urls:
                 raise NewsError(f"第 {index} 条与已选新闻重复")
@@ -289,4 +315,4 @@ class NewsRepository:
                 "demo_sample": record["demo_sample"],
             })
         kind = "news" if selected else "no_news"
-        return kind, {"items": selected, "note": note.strip()[:2000], "generated_at": isoformat(self.now), "demo_sample": self.demo_mode}
+        return kind, {"items": selected, "note": note.strip()[:2000], "generated_at": isoformat(self.now), "demo_sample": self.demo_mode, "content_window": content_window}

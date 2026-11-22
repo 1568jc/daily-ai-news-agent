@@ -18,8 +18,8 @@ TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": "search_content", "description": "在任务目录的文本文件中搜索关键词，英文忽略大小写。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "dir": {"type": "string"}}, "required": ["keyword", "dir"]}}},
     {"type": "function", "function": {"name": "write_file", "description": "在 output/ 中写入候选清单或草稿，不能覆盖偏好和原始材料。", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "bash", "description": "执行受限只读命令，仅允许 wc -l/-w/-c 后接工作区内的文件路径。", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
-    {"type": "function", "function": {"name": "fetch_news", "description": "按 sources.json 中的来源 ID 拉取 RSS/Atom。since 必须是带时区的 ISO 时间。返回真实状态、材料路径和候选摘要；候选足够时可直接提交，无需重复读取整个文件。", "parameters": {"type": "object", "properties": {"source_id": {"type": "string"}, "since": {"type": "string"}}, "required": ["source_id", "since"]}}},
-    {"type": "function", "function": {"name": "submit_brief", "description": "提交最终简报，最多 5 条。只能引用实际材料中的 news_id；摘要必须忠实于材料，reason 说明与用户偏好的关系。没有匹配新闻且来源可用时，items 可为空并在 note 说明。成功提交即结束。", "parameters": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"news_id": {"type": "string"}, "title_zh": {"type": "string"}, "summary": {"type": "string"}, "reason": {"type": "string"}}, "required": ["news_id", "title_zh", "summary", "reason"]}}, "note": {"type": "string"}}, "required": ["items", "note"]}}},
+    {"type": "function", "function": {"name": "fetch_news", "description": "按 sources.json 中的来源 ID 拉取 RSS/Atom。since 必须是带时区的 ISO 时间。items 是正常候选；count 为 0 时，recent_items 提供最近 7 天候选供近期补充使用。候选足够时可直接提交，无需重复读取整个文件。", "parameters": {"type": "object", "properties": {"source_id": {"type": "string"}, "since": {"type": "string"}}, "required": ["source_id", "since"]}}},
+    {"type": "function", "function": {"name": "submit_brief", "description": "提交最终简报，最多 5 条。只能引用实际材料中的 news_id；摘要必须忠实于材料，reason 说明与用户偏好的关系。没有匹配新闻且来源可用时，items 可为空并在 note 说明。仅当已抓取材料没有任何过去 24 小时新闻时，才能将 recent_fallback 设为 true 并从 recent_items 选择最近 7 天内容；note 必须说明这是非今日新闻。成功提交即结束。", "parameters": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"news_id": {"type": "string"}, "title_zh": {"type": "string"}, "summary": {"type": "string"}, "reason": {"type": "string"}}, "required": ["news_id", "title_zh", "summary", "reason"]}}, "note": {"type": "string"}, "recent_fallback": {"type": "boolean", "description": "默认 false；true 表示今日无新发布，使用最近 7 天内容作为明确标注的补充。"}}, "required": ["items", "note"]}}},
 ]
 
 
@@ -152,15 +152,15 @@ class ToolRegistry:
     def fetch_news(self, source_id: str, since: str) -> dict:
         return self.news.fetch(source_id, since)
 
-    def submit_brief(self, items: object, note: str) -> dict:
+    def submit_brief(self, items: object, note: str, recent_fallback: bool = False) -> dict:
         if self.submitted is not None:
             raise ToolError("本次任务已经提交过简报")
-        kind, content = self.news.validate_submission(items, note)
+        kind, content = self.news.validate_submission(items, note, recent_fallback=recent_fallback)
         output = self.workspace / "output" / "submission.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
         self.submitted = (kind, content)
-        return {"ok": True, "status": "submitted", "kind": kind, "item_count": len(content["items"])}
+        return {"ok": True, "status": "submitted", "kind": kind, "item_count": len(content["items"]), "content_window": content["content_window"]}
 
     def execute(self, name: str, arguments: dict) -> dict:
         handler = self.handlers.get(name)

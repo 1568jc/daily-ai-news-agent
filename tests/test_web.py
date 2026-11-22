@@ -64,6 +64,19 @@ class WebTests(unittest.TestCase):
         self.assertIn("模拟来源失败", response.text)
         self.assertNotIn("最终邮件正文预览", response.text)
 
+    def test_recent_fallback_is_clearly_labelled_in_workspace(self):
+        database = self.client.app.state.database
+        user = database.create_user("近期补充", "recent@example.com", "2026-01-15T00:00:00Z")
+        database.save_subscription(user["id"], ["AI 研究"], [], "2026-01-15T00:00:00Z")
+        brief_id, _ = database.reserve_brief(user["id"], "2026-01-15", "2026-01-15T00:00:00Z")
+        content = {"items": [], "note": "今日暂无新发布，最近 7 天也没有匹配内容。", "content_window": "recent_7d", "demo_sample": False}
+        database.save_generated_brief(brief_id, "no_news", content, "# 近期补充", "近期补充", "preview", "2026-01-15T00:00:00Z")
+        response = self.client.get(f"/?user_id={user['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("近期 7 天补充", response.text)
+        self.assertIn("今日暂无新发布", response.text)
+        self.assertIn("非今日新闻", response.text)
+
     def test_generating_page_automatically_refreshes(self):
         database = self.client.app.state.database
         user = database.create_user("后台任务", "background@example.com", "2026-01-15T00:00:00Z")

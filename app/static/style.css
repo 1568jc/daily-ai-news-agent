@@ -195,6 +195,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, "Mi
 .notice { padding: 10px 14px; border-radius: 8px; margin: 0 0 14px; font-size: 13px; }
 .notice.success { background: var(--green-soft); color: var(--green); }
 .notice.error { background: #fae7e5; color: var(--red); }
+.notice.recent { background: #fff1d9; color: var(--amber); margin-top: 12px; }
 .settings-page { max-width: 800px; margin: 10px auto; padding: 24px; }
 .settings-page h1 { margin: 4px 0 10px; }
 .settings-actions { display: flex; align-items: center; gap: 16px; }

@@ -8,7 +8,7 @@
 
 - **用户与订阅管理**：支持用户查询、创建、修改和删除；每个用户可以独立配置话题、关键词和收件邮箱。
 - **自主工具调用**：DeepSeek 通过 Function Calling 选择工具和参数，系统提供 7 个受约束的工具，并记录真实调用参数、返回结果和耗时。
-- **个性化新闻简报**：从多个 RSS / Atom 来源获取材料，筛选最近 24 小时的内容，生成最多 5 条带来源链接的中文简报。
+- **个性化新闻简报**：从 12 个 RSS / Atom 来源获取材料，优先筛选最近 24 小时的内容；没有当日更新时，可提供明确标注的最近 7 天补充简报，最多 5 条并附真实来源链接。
 - **历史与版本管理**：按日期切换简报；重新生成时保留旧正文、运行记录和工具轨迹。
 - **重复操作保护**：同一用户同一天重复执行普通生成时复用已有简报，不重复运行 Agent 或投递邮件。
 - **独立生成与投递**：重新生成会创建新版本；再次发送只投递当前简报，不重新调用模型。投递失败后可以重试。
@@ -114,12 +114,22 @@ AINEWS_NOW=
 extra_body={"thinking": {"type": "disabled"}}
 ```
 
-当前新闻来源：
+当前提供 12 个新闻来源，Agent 会根据用户话题和来源类别自主选择，通常抓取其中 3～5 个，而不是固定遍历全部来源：
 
 - [OpenAI News](https://openai.com/news/rss.xml)
 - [Hugging Face Blog](https://huggingface.co/blog/feed.xml)
 - [Google DeepMind Blog](https://deepmind.google/blog/rss.xml)
+- [Google AI Blog](https://blog.google/technology/ai/rss/)
+- [Microsoft Research Blog](https://www.microsoft.com/en-us/research/feed/)
+- [AWS Machine Learning Blog](https://aws.amazon.com/blogs/machine-learning/feed/)
+- [GitHub AI & ML Blog](https://github.blog/ai-and-ml/feed/)
+- [TechCrunch AI](https://techcrunch.com/category/artificial-intelligence/feed/)
+- [MIT Technology Review AI](https://www.technologyreview.com/topic/artificial-intelligence/feed/)
 - [arXiv cs.AI](https://rss.arxiv.org/rss/cs.AI)
+- [arXiv cs.LG](https://rss.arxiv.org/rss/cs.LG)
+- [arXiv cs.CL](https://rss.arxiv.org/rss/cs.CL)
+
+正常简报只收录过去 24 小时内的新闻。如果已抓取材料中没有任何 24 小时候选，Agent 可以使用 `recent_fallback=true` 提交最近 7 天内的最多 5 条补充内容；网页、邮件和备注会明确标注“近期补充”和“非今日新闻”。超过 7 天的材料仍不能提交，也不能在存在当日新闻时启用补充模式。
 
 RSS 提供标题、日期、链接和来源摘要等材料，不代表抓取了每篇新闻的全文。实际可用性取决于网络、新闻来源和模型服务。
 

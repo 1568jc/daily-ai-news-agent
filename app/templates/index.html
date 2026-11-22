@@ -97,7 +97,7 @@
       <div><p class="eyebrow">{{ brief.brief_date }}</p><h3>每日 AI 新闻简报</h3></div>
       <span class="status status-{{ brief.status }}">{{ brief.status_label }}</span>
     </div>
-    <p class="meta">生成：{{ brief.created_at | beijing_time }} · 类型：{{ '无匹配新闻' if brief.kind == 'no_news' else '新闻简报' }}{% if brief.run %} · 模式：{{ '离线测试替身' if brief.run.mode == 'demo' else 'DeepSeek API' }}{% endif %}</p>
+    <p class="meta">生成：{{ brief.created_at | beijing_time }} · 类型：{% if brief.content and brief.content.content_window == 'recent_7d' %}近期 7 天补充{% elif brief.kind == 'no_news' %}无匹配新闻{% else %}新闻简报{% endif %}{% if brief.run %} · 模式：{{ '离线测试替身' if brief.run.mode == 'demo' else 'DeepSeek API' }}{% endif %}</p>
     {% if brief.delivered_at %}<p class="meta">投递：{{ brief.delivered_at | beijing_time }}</p>{% endif %}
     {% if brief.error %}<div class="notice error">{{ brief.error }}</div>{% endif %}
     {% if brief.status == 'delivery_failed' or (brief.status == 'preview' and smtp_configured) %}
@@ -107,6 +107,7 @@
     <form class="resend-form" method="post" action="/users/{{ selected.id }}/briefs/{{ brief.id }}/resend" onsubmit="return confirm('将再次发送同一内容，不会生成新简报。确定继续吗？');"><button class="secondary" type="submit">再次发送此简报</button></form>
     {% endif %}
     {% if brief.content %}
+      {% if brief.content.content_window == 'recent_7d' %}<div class="notice recent"><strong>今日暂无新发布</strong> · 以下为最近 7 天内的补充内容，非今日新闻，发布日期见各条目。</div>{% endif %}
       {% if brief.content.demo_sample %}<div class="sample-label">演示样例 · 非真实新闻</div>{% endif %}
       {% for item in brief.content["items"] %}
       <div class="news-item">
