@@ -122,6 +122,15 @@ class NewsValidationTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         sleep.assert_called_once()
 
+    def test_slow_connection_reserves_budget_for_second_attempt(self):
+        repository = NewsRepository(self.workspace / "slow_connection", self.now, 15, False)
+        responses = [TimeoutError("handshake timed out"), BytesIO(self._rss(self._recent_item()))]
+        with patch("app.news.time.monotonic", side_effect=[0, 0, 6, 6, 6.25]), patch("app.news.urllib.request.urlopen", side_effect=responses) as request, patch("app.news.time.sleep"):
+            records = repository._fetch_feed("https://example.com/feed.xml", "测试来源")
+        self.assertEqual(len(records), 1)
+        timeouts = [call.kwargs["timeout"] for call in request.call_args_list]
+        self.assertEqual(timeouts, [6, 8.75])
+
     def test_transient_malformed_feed_is_retried(self):
         repository = NewsRepository(self.workspace / "parse_retry", self.now, 2, False)
         responses = [BytesIO(b"<rss><channel>&</channel></rss>"), BytesIO(self._rss(self._recent_item()))]

@@ -213,7 +213,9 @@ class NewsRepository:
         deadline = time.monotonic() + self.timeout
         for attempt in range(2):
             try:
-                with urllib.request.urlopen(request, timeout=max(0.1, deadline - time.monotonic())) as response:
+                remaining = max(0.0, deadline - time.monotonic())
+                attempt_timeout = max(0.1, min(6.0, remaining / 2)) if attempt == 0 else max(0.1, remaining)
+                with urllib.request.urlopen(request, timeout=attempt_timeout) as response:
                     content = response.read(5_000_001)
                 if len(content) > 5_000_000:
                     raise NewsError("RSS 响应超过 5 MB 限制")
