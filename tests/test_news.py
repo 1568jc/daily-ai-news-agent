@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from app.clock import isoformat
 from app.news import NewsError, NewsRepository, demo_items, item_id, parse_datetime
@@ -91,6 +93,48 @@ class NewsValidationTests(unittest.TestCase):
         self.assertEqual(result["count"], 30)
         self.assertEqual(len(result["items"]), 12)
         self.assertTrue(result["digest_truncated"])
+
+    @staticmethod
+    def _rss(items: str = "") -> bytes:
+        return f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>测试来源</title>{items}</channel></rss>'.encode("utf-8")
+
+    def _recent_item(self) -> str:
+        return "<item><title>新模型发布</title><link>https://example.com/news/1</link><pubDate>Wed, 14 Jan 2026 23:00:00 GMT</pubDate><description>模型发布摘要</description></item>"
+
+    def test_valid_empty_feed_is_a_successful_empty_result(self):
+        repository = NewsRepository(self.workspace / "empty_feed", self.now, 2, False)
+        with patch("app.news.urllib.request.urlopen", return_value=BytesIO(self._rss())):
+            result = repository.fetch("arxiv_ai", isoformat(self.now - timedelta(hours=24)))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(repository.fetch_successes, 1)
+        self.assertEqual(repository.fetch_failures, 0)
+
+    def test_transient_network_failure_is_retried(self):
+        repository = NewsRepository(self.workspace / "network_retry", self.now, 2, False)
+        responses = [TimeoutError("timed out"), BytesIO(self._rss(self._recent_item()))]
+        with patch("app.news.urllib.request.urlopen", side_effect=responses) as request, patch("app.news.time.sleep") as sleep:
+            result = repository.fetch("openai", isoformat(self.now - timedelta(hours=24)))
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_transient_malformed_feed_is_retried(self):
+        repository = NewsRepository(self.workspace / "parse_retry", self.now, 2, False)
+        responses = [BytesIO(b"<rss><channel>&</channel></rss>"), BytesIO(self._rss(self._recent_item()))]
+        with patch("app.news.urllib.request.urlopen", side_effect=responses) as request, patch("app.news.time.sleep"):
+            result = repository.fetch("deepmind", isoformat(self.now - timedelta(hours=24)))
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(repository.fetch_failures, 0)
+
+    def test_persistent_malformed_feed_retries_only_once(self):
+        repository = NewsRepository(self.workspace / "persistent_parse_failure", self.now, 2, False)
+        with patch("app.news.urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: BytesIO(b"<rss><channel>&</channel></rss>")) as request, patch("app.news.time.sleep"):
+            with self.assertRaisesRegex(NewsError, "RSS 解析失败"):
+                repository.fetch("deepmind", isoformat(self.now - timedelta(hours=24)))
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(repository.fetch_failures, 1)
 
 
 if __name__ == "__main__":

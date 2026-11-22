@@ -4,10 +4,12 @@ import calendar
 import hashlib
 import json
 import re
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
@@ -199,32 +201,44 @@ class NewsRepository:
 
     def _fetch_feed(self, url: str, source_name: str) -> list[dict]:
         request = urllib.request.Request(url, headers={"User-Agent": "DailyAINewsAgent/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"})
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            content = response.read(5_000_001)
-        if len(content) > 5_000_000:
-            raise NewsError("RSS 响应超过 5 MB 限制")
-        feed = feedparser.parse(content)
-        if not feed.entries:
-            detail = str(getattr(feed, "bozo_exception", "没有条目"))
-            raise NewsError(f"RSS 没有可解析条目：{detail}")
-        records = []
-        for entry in feed.entries[:100]:
-            url_value = entry.get("link", "")
-            date_value = entry.get("published_parsed") or entry.get("updated_parsed")
-            if not url_value or not date_value or not entry.get("title"):
-                continue
-            published = datetime.fromtimestamp(calendar.timegm(date_value), tz=timezone.utc)
-            entry_data = {
-                "title": entry.get("title"),
-                "url": url_value,
-                "published_at": published,
-                "summary": entry.get("summary") or entry.get("description") or "",
-            }
+        deadline = time.monotonic() + self.timeout
+        for attempt in range(2):
             try:
-                records.append(self._normalize(entry_data, source_name))
-            except (NewsError, ValueError):
-                continue
-        return records
+                with urllib.request.urlopen(request, timeout=max(0.1, deadline - time.monotonic())) as response:
+                    content = response.read(5_000_001)
+                if len(content) > 5_000_000:
+                    raise NewsError("RSS 响应超过 5 MB 限制")
+                feed = feedparser.parse(content)
+                if not feed.entries:
+                    if not feed.bozo:
+                        return []
+                    detail = str(getattr(feed, "bozo_exception", "未知解析错误"))
+                    raise NewsError(f"{source_name} RSS 解析失败：{detail}")
+                records = []
+                for entry in feed.entries[:100]:
+                    url_value = entry.get("link", "")
+                    date_value = entry.get("published_parsed") or entry.get("updated_parsed")
+                    if not url_value or not date_value or not entry.get("title"):
+                        continue
+                    published = datetime.fromtimestamp(calendar.timegm(date_value), tz=timezone.utc)
+                    entry_data = {
+                        "title": entry.get("title"),
+                        "url": url_value,
+                        "published_at": published,
+                        "summary": entry.get("summary") or entry.get("description") or "",
+                    }
+                    try:
+                        records.append(self._normalize(entry_data, source_name))
+                    except (NewsError, ValueError):
+                        continue
+                return records
+            except (OSError, ValueError, NewsError) as exc:
+                if isinstance(exc, HTTPError) and exc.code not in {408, 425, 429} and exc.code < 500:
+                    raise
+                retryable = not isinstance(exc, NewsError) or "RSS 解析失败：" in str(exc)
+                if attempt == 1 or not retryable or time.monotonic() >= deadline:
+                    raise
+                time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
 
     def eligible_records(self) -> dict[str, dict]:
         start = self.now - timedelta(hours=24)
