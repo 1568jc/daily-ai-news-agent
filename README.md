@@ -141,7 +141,7 @@ RSS 提供标题、日期、链接和来源摘要等材料，不代表抓取了�
 | --- | --- | --- |
 | `AINEWS_DB` | `data/ainews.db` | SQLite 数据库路径 |
 | `AINEWS_TASK_DIR` | `data/tasks` | Agent 任务工作区 |
-| `AINEWS_MAX_ROUNDS` | `12` | 单次任务最大模型轮次 |
+| `AINEWS_MAX_ROUNDS` | `12` | 最大模型轮次，最后 3 轮保留给提交和校验修正 |
 | `AINEWS_AGENT_TIMEOUT_SECONDS` | `240` | Agent 任务超时时间 |
 | `AINEWS_NEWS_TIMEOUT_SECONDS` | `15` | 单个新闻来源请求超时时间 |
 | `AINEWS_NOW` | 空 | 固定带时区的样例时间，真实模式保持为空 |

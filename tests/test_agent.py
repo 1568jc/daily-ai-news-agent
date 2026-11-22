@@ -96,6 +96,39 @@ class AgentLoopTests(unittest.TestCase):
         with self.assertRaises(AgentError):
             runner.run()
 
+    def test_last_three_rounds_allow_submission_and_validation_correction(self):
+        class FinalizationClient:
+            def __init__(self):
+                self.round = 0
+                self.identifier = ""
+                self.tool_names = []
+                self.submission_attempts = 0
+
+            def _call(self, name, arguments):
+                return {"role": "assistant", "content": None, "tool_calls": [{"id": f"call-{self.round}", "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+
+            def complete(self, messages, tools):
+                self.round += 1
+                names = [tool["function"]["name"] for tool in tools]
+                self.tool_names.append(names)
+                if names != ["submit_brief"]:
+                    return self._call("list_dir", {"path": "."})
+                self.submission_attempts += 1
+                identifier = "news_invalid" if self.submission_attempts < 3 else self.identifier
+                item = {"news_id": identifier, "title_zh": "中文标题", "summary": "来源材料支持的摘要", "reason": "匹配偏好"}
+                return self._call("submit_brief", {"items": [item], "note": "测试提交"})
+
+        client = FinalizationClient()
+        runner, run_id = self._runner(client)
+        client.identifier = next(iter(runner.registry.news.eligible_records()))
+        kind, _, rounds = runner.run()
+        self.assertEqual(kind, "news")
+        self.assertEqual(rounds, self.settings.max_rounds)
+        self.assertEqual(client.tool_names[-3:], [["submit_brief"]] * 3)
+        submissions = self.db.list_tool_calls(run_id)[-3:]
+        self.assertEqual([call["tool_name"] for call in submissions], ["submit_brief"] * 3)
+        self.assertEqual([bool(call["ok"]) for call in submissions], [False, False, True])
+
 
 if __name__ == "__main__":
     unittest.main()
