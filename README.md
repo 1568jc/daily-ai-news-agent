@@ -1,12 +1,42 @@
 # 每日 AI 新闻助手 Agent
 
-一个可本地运行、可演示的面试项目。用户设置关注话题和中英文关键词，Agent 通过 RSS / Atom 材料生成最多 5 条个性化中文简报，保存历史并投递邮件。
+一个基于 DeepSeek Function Calling 的个性化新闻简报应用。用户可以配置关注话题、中英文关键词和收件邮箱，由 Agent 获取 RSS / Atom 新闻材料，生成最多 5 条中文简报，并支持历史版本、邮件投递和每日定时执行。
 
-**核心不是固定流水线：真实模式下，DeepSeek 根据每次工具返回的真实结果，自主决定下一次工具调用、补抓次数和结束时机。** `submit_brief` 成功后循环才结束。
+真实模式下，Agent 根据每次工具调用的返回结果，自主决定下一步操作，而不是执行写死的新闻处理流水线。只有 `submit_brief` 提交并通过校验后，任务才会结束。
 
-## 快速启动（Windows PowerShell）
+## 功能特性
 
-要求 Python 3.11+。
+- **用户与订阅管理**：支持用户查询、创建、修改和删除；每个用户可以独立配置话题、关键词和收件邮箱。
+- **自主工具调用**：DeepSeek 通过 Function Calling 选择工具和参数，系统提供 7 个受约束的工具，并记录真实调用参数、返回结果和耗时。
+- **个性化新闻简报**：从多个 RSS / Atom 来源获取材料，筛选最近 24 小时的内容，生成最多 5 条带来源链接的中文简报。
+- **历史与版本管理**：按日期切换简报；重新生成时保留旧正文、运行记录和工具轨迹。
+- **重复操作保护**：同一用户同一天重复执行普通生成时复用已有简报，不重复运行 Agent 或投递邮件。
+- **独立生成与投递**：重新生成会创建新版本；再次发送只投递当前简报，不重新调用模型。投递失败后可以重试。
+- **可调整的工作台**：后台执行任务，局部更新进度并保留滚动位置；支持历史标签切换、双栏拖拽和窄屏自适应布局。
+- **邮件与定时任务**：支持管理员统一配置 SMTP，默认每天北京时间 08:00 执行。
+
+## 技术栈
+
+- 后端：Python 3.11+、FastAPI、Uvicorn
+- 页面：Jinja2、原生 JavaScript、CSS
+- 数据与调度：SQLite、APScheduler
+- 模型与新闻：OpenAI Python SDK、DeepSeek API、RSS / Atom
+- 邮件：Python SMTP、STARTTLS
+
+## 快速开始
+
+### 1. 获取项目
+
+```bash
+git clone https://github.com/1568jc/daily-ai-news-agent.git
+cd daily-ai-news-agent
+```
+
+私有仓库需要相应的 GitHub 访问权限。
+
+### 2. 安装并启动
+
+Windows PowerShell：
 
 ```powershell
 py -m venv .venv
@@ -15,42 +45,60 @@ Copy-Item .env.example .env
 .venv\Scripts\python -m app.main
 ```
 
-打开 <http://127.0.0.1:8000>。默认是**离线演示模式**，无需 API Key、SMTP 或外网。服务需保持运行，定时任务才会触发；请使用上述单进程启动方式，不要开启 reload 或多 worker。
+macOS / Linux：
 
-页面采用全宽工作台：左侧用户栏支持按昵称或邮箱模糊查询；中间设置订阅，右侧直接展示生成结果和历史切换。拖拽双栏分隔条可调整宽度并记住设置，窄屏自动切换为上下布局。选中用户后可修改昵称、邮箱和订阅；“删除用户”会二次确认，并级联删除其订阅、历史简报和工具记录。仍有生成或投递任务的用户需等任务结束后再删除。
-
-macOS / Linux 将虚拟环境 Python 路径换成 `.venv/bin/python`，并用 `cp .env.example .env`。
-
-## 三分钟面试演示
-
-### 场景 A：同一批新闻，两种订阅
-
-1. 点击首页“**一键准备三位演示用户**”。
-2. 查看“演示甲·编程”和“演示乙·研究”：两者都读取 `news/demo_existing.json`，但选题和匹配理由分别面向编程工具与 AI 研究。
-3. 展开“本次工具调用”，指出顺序、参数、真实返回值和耗时来自 `tool_calls` 表，而不是展示一段伪造文本。
-4. 页面和简报均标注“演示样例 / 离线测试替身”，不会冒充真实新闻或真实 LLM 运行。
-
-### 场景 B：已有材料与缺少材料
-
-1. 甲、乙的任务预置了相同材料。
-2. 丙的 `news/` 初始为空。展开丙的工具记录，可以看到模型测试替身依据空目录结果调用 `fetch_news`，再读取返回的材料路径并提交。
-3. 新建用户时也可勾选“从空 news/ 目录开始”；该选项只对尚未生成当日简报的新任务有效。
-4. 样例时间根据演示时钟动态生成，不会因存放几天而失效。可用 `AINEWS_NOW` 固定带时区的演示时间。
-
-### 场景 C：重复触发与异常
-
-1. 对同一用户连续点击“立即生成并预览”：数据库以“用户 + 北京日期”唯一约束复用同一份简报，页面明确提示重复操作，不重复运行或投递。
-2. 需要新内容时使用“重新生成并预览/推送”：手动确认后启动新 Agent 任务，旧正文、运行 ID 和工具记录保存在可展开的历史版本中。
-3. 需要重发同一邮件时使用“再次发送此简报”：只投递当前内容，不重新运行 Agent。未配置 SMTP 时明确显示“仅预览”，不会标记为已发送。
-4. 运行下面的离线异常测试：来源失败不会产生“今日无新闻”的正常简报；SMTP 失败会保留正文，重试只发送已有简报，不重新运行 Agent。
-
-```powershell
-.venv\Scripts\python -m unittest tests.test_service.BriefServiceTests.test_source_failure_does_not_create_or_send_normal_brief tests.test_service.BriefServiceTests.test_delivery_failure_retries_saved_brief_without_regenerating tests.test_web.WebTests.test_source_failure_is_shown_without_email_preview -v
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/python -m app.main
 ```
 
-## 切换真实 DeepSeek + RSS 模式
+打开 <http://127.0.0.1:8000>。健康检查地址为 <http://127.0.0.1:8000/health>。
 
-编辑 `.env`：
+默认启用**离线样例模式**，无需 API Key、SMTP 或外网即可体验完整交互。页面和简报会明确标注离线样例与测试替身，不会将其标记为真实模型运行结果。
+
+服务需要保持运行，定时任务才会触发。请使用上述单进程启动方式，不要开启 reload 或多个 worker。
+
+## 使用说明
+
+### 用户与订阅
+
+1. 创建用户，填写昵称、收件邮箱、关注话题和中英文关键词。
+2. 在左侧用户列表选择用户，可按昵称或邮箱进行模糊查询。
+3. 选中用户后可以修改资料和订阅，也可以删除用户。
+4. 删除操作需要二次确认，并级联删除该用户的订阅、简报、历史版本和工具记录。仍有任务执行时需要等待任务结束。
+
+离线样例模式下，可以点击“一键准备三位演示用户”，快速查看同一批新闻面向不同订阅生成的个性化结果。新建用户时也可以选择从空 `news/` 目录开始，观察 Agent 获取材料的过程。
+
+### 生成、重新生成与重发
+
+- **立即生成并预览/推送**：生成当天简报；配置 SMTP 后会尝试投递。同一天重复操作会明确提示，不重复生成或发送。
+- **重新生成并预览/推送**：再次调用模型和新闻源，生成新版本，并保留旧版本。配置 SMTP 后可能再次投递，因此需要手动确认。
+- **再次发送此简报**：只重新发送当前内容，不生成新简报。投递失败时也可以只重试邮件。
+
+未配置 SMTP 时，系统只生成本地预览，不会显示为已发送。新闻来源失败与确实没有匹配新闻会分别显示。
+
+### 简报工作台
+
+- 右侧区域直接展示当前简报，通过日期标签切换历史简报。
+- 展开“本次工具调用”可查看工具顺序、参数、返回结果和耗时。
+- 重新生成前的正文和工具轨迹保存在历史版本中。
+- 桌面端可以拖拽双栏分隔条调整宽度，设置会保存在浏览器中；窄屏自动切换为上下布局。
+- 任务执行期间页面每 2.5 秒局部更新，不整页刷新，也不会主动重置窗口或简报的滚动位置。
+
+### 每日定时任务
+
+默认每天北京时间 **08:00** 执行，与手动生成共用任务入口和每日重复保护。可通过以下配置调整时间：
+
+```dotenv
+AINEWS_DAILY_HOUR=8
+AINEWS_DAILY_MINUTE=0
+```
+
+## 配置真实 DeepSeek 与 RSS
+
+编辑项目根目录的 `.env`：
 
 ```dotenv
 AINEWS_DEMO_MODE=false
@@ -60,63 +108,106 @@ DEEPSEEK_MODEL=deepseek-flash
 AINEWS_NOW=
 ```
 
-重启服务后创建订阅并点击“立即生成并预览/推送”。任务在后台执行，页面每 2.5 秒轮询状态，只局部更新简报区域，不整页刷新，也不会重置滚动位置；生成过程中仍可查看已执行的工具记录。每轮模型调用均传入 `tools` 和：
+保存后重启服务。真实模式从空材料目录开始，由 Agent 选择来源并调用工具。每轮模型调用都提供工具定义，并传入：
 
 ```python
 extra_body={"thinking": {"type": "disabled"}}
 ```
 
-真实模式从空材料目录开始，由模型选择来源。当前配置：
+当前新闻来源：
 
-- OpenAI News：`https://openai.com/news/rss.xml`
-- Hugging Face Blog：`https://huggingface.co/blog/feed.xml`
-- Google DeepMind Blog：`https://deepmind.google/blog/rss.xml`
-- arXiv cs.AI：`https://rss.arxiv.org/rss/cs.AI`
+- [OpenAI News](https://openai.com/news/rss.xml)
+- [Hugging Face Blog](https://huggingface.co/blog/feed.xml)
+- [Google DeepMind Blog](https://deepmind.google/blog/rss.xml)
+- [arXiv cs.AI](https://rss.arxiv.org/rss/cs.AI)
 
-本次开发环境已实际访问并解析这四个地址，均能获得带标题、日期和原文链接的条目；后续可用性取决于网络和来源方。RSS 只提供材料，摘要是基于来源文本生成的，不代表已抓取每篇新闻全文。
+RSS 提供标题、日期、链接和来源摘要等材料，不代表抓取了每篇新闻的全文。实际可用性取决于网络、新闻来源和模型服务。
 
-### 邮件推送
+其他常用配置：
 
-普通用户只需在订阅中填写自己的收件邮箱。SMTP 是整个系统共用的发件账户，由本地管理员点击页面右上角“邮件设置”进行配置，保存后立即生效，无需重启。QQ 邮箱可使用 `smtp.qq.com:587`，密码字段填写 SMTP 授权码。
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `AINEWS_DB` | `data/ainews.db` | SQLite 数据库路径 |
+| `AINEWS_TASK_DIR` | `data/tasks` | Agent 任务工作区 |
+| `AINEWS_MAX_ROUNDS` | `12` | 单次任务最大模型轮次 |
+| `AINEWS_AGENT_TIMEOUT_SECONDS` | `240` | Agent 任务超时时间 |
+| `AINEWS_NEWS_TIMEOUT_SECONDS` | `15` | 单个新闻来源请求超时时间 |
+| `AINEWS_NOW` | 空 | 固定带时区的样例时间，真实模式保持为空 |
 
-授权码不会在页面回显，留空修改其他字段时会保留原授权码；它不会进入 Agent 工作区或工具日志。本地演示将设置保存在 SQLite 中；公网部署必须增加管理员鉴权，并改用加密凭据存储。
+## 邮件投递设置
 
-SMTP 未配置时就是本地预览。配置完成后，历史“仅预览”简报也会出现“发送此简报”按钮。`.env` 中的 `SMTP_*` 仍可作为首次启动时的备用配置，网页保存过设置后以网页配置为准。
+普通用户只需在自己的订阅中填写收件邮箱。SMTP 是整个系统共用的发件账户，由管理员统一配置。
 
-程序先保存成功生成的简报，再投递。状态包括“仅预览”“已投递”“投递失败”“来源失败”等；来源失败与确实没有匹配新闻不会混为一谈。
+1. 打开页面右上角的“邮件设置”，或访问 <http://127.0.0.1:8000/email-settings>。
+2. 填写 SMTP 服务器、端口、登录账号、发件邮箱和授权码。
+3. 保存后立即生效，无需重启服务。
+4. 返回用户页面生成简报，或对已有简报执行发送。
+
+QQ 邮箱示例：
+
+```text
+SMTP 服务器：smtp.qq.com
+端口：587
+登录账号：完整 QQ 邮箱地址
+发件邮箱：完整 QQ 邮箱地址
+SMTP 授权码：QQ 邮箱设置中生成的授权码，不是 QQ 密码
+加密方式：勾选 STARTTLS
+```
+
+当前使用 `587 + STARTTLS`，不支持直接使用 SSL 465。授权码不会在页面回显；修改其他设置时留空即可保留原授权码。授权码不会进入 Agent 工作区或工具日志。
+
+`.env` 中的 `SMTP_*` 可作为备用配置；网页保存过设置后，以网页配置为准。清空 SMTP 服务器和发件邮箱后保存，即可关闭投递并恢复“仅预览”。
+
+程序先保存成功生成的简报，再尝试投递。状态包括“仅预览”“已投递”“投递失败”和“来源失败”。
 
 ## 运行测试
+
+Windows PowerShell：
 
 ```powershell
 .venv\Scripts\python -m unittest discover -v
 ```
 
-测试完全离线，覆盖：
+macOS / Linux：
 
-- 模型根据实际工具结果改变后续调用，以及 `tool_call_id` 对应关系；
-- 有材料直接读取、空目录补抓、未提交不能结束；
-- 新闻 ID、24 小时窗口、5 条上限、来源与 URL 回填；
-- 文件路径隔离、只读 `wc` 白名单、英文忽略大小写搜索；
-- 个性化样例、每日幂等、来源失败、邮件失败及已有简报重试；
-- 订阅页面、生成历史、调度器启动和前端异常状态。
+```bash
+.venv/bin/python -m unittest discover -v
+```
 
-## 代码导览
+测试完全离线，主要覆盖：
 
-- `app/agent.py`：**Agent 主循环**。保留 assistant 消息，执行模型请求的工具，按 `tool_call_id` 回传结果，成功提交后结束。
-- `app/tools.py`：七个工具的 schema、注册与执行；文件限定在当前用户任务目录，shell 仅允许只读 `wc`。
-- `app/news.py`：RSS / Atom 抓取、演示材料、URL 规范化、新闻 ID 和最终提交校验。
-- `app/llm.py`：DeepSeek 官方 API 的 OpenAI SDK 接入。
-- `app/demo_llm.py`：明确标注的确定性测试替身，仅用于离线演示和测试。
-- `app/service.py`：手动按钮与定时任务共用的任务入口；生成、保存、投递和重试。
-- `app/scheduler.py`：APScheduler 入口，默认每天北京时间 08:00。
-- `app/database.py`：SQLite schema、每日唯一约束和真实工具执行记录。
-- `app/main.py`：FastAPI 路由与单进程生命周期。
-- `app/templates/index.html`：订阅、历史简报、邮件预览及工具轨迹页面。
+- Agent 根据工具结果调整后续调用、工具调用 ID 对应关系和提交结束条件；
+- 有材料读取、空目录补抓、24 小时窗口和最多 5 条新闻校验；
+- 文件路径隔离、只读 `wc` 白名单和英文忽略大小写搜索；
+- 每日重复保护、历史版本、来源失败、邮件失败与已有简报重试；
+- 用户管理、订阅页面、调度器启动和前端异常状态。
 
-任务工作区位于 `data/tasks/<用户>/<日期与运行ID>/`，包含偏好、来源、近期简报索引、新闻材料和最终提交。数据库默认为 `data/ainews.db`。运行数据和 `.env` 均被 Git 忽略。
+## 项目结构
 
-## 验证边界
+```text
+app/
+├── agent.py          # Agent 主循环与工具调用协调
+├── tools.py          # 7 个工具的定义、参数校验与执行
+├── news.py           # RSS / Atom 抓取、材料处理和新闻校验
+├── llm.py            # 通过 OpenAI SDK 接入 DeepSeek
+├── demo_llm.py       # 明确标注的离线模型测试替身
+├── service.py        # 生成、保存、投递、重新生成与重试
+├── database.py       # SQLite 数据结构与每日唯一约束
+├── scheduler.py      # 每日定时任务
+├── main.py           # FastAPI 路由与应用生命周期
+├── templates/        # 页面模板
+└── static/           # 样式与前端交互
+tests/                # 离线自动化测试
+.env.example          # 环境变量示例，不含真实凭据
+requirements.txt      # Python 依赖
+```
 
-离线测试和真实 RSS 解析可以在无凭据时验证。**真实 DeepSeek 工具调用及真实 SMTP 投递仍需要有效凭据后验证**；离线测试替身通过不代表这两条外部链路已实测。
+任务工作区位于 `data/tasks/<用户>/<日期与运行ID>/`，包含偏好、来源、近期简报索引、新闻材料和最终提交。数据库默认为 `data/ainews.db`。运行数据、虚拟环境和 `.env` 均已被 Git 忽略。
 
-这是本地面试项目，未实现登录鉴权，不应直接暴露到公网。APScheduler 在单进程内运行，进程停止期间不会生成简报，也未实现分布式调度或错过任务的补跑。
+## 部署与安全注意事项
+
+- 当前版本未实现登录鉴权，适合本地或受信环境使用，不应直接暴露到公网。
+- 邮件设置保存在本地 SQLite 中。公网部署应增加管理员鉴权，并使用加密凭据存储。
+- 请妥善保管 `.env` 和 SMTP 授权码，不要提交到 Git 或发送到 Agent 工具中。
+- APScheduler 在单进程内运行；进程停止期间不会生成简报，也未实现分布式调度或错过任务的补跑。
+- 离线测试可以验证应用逻辑，但不能保证真实 DeepSeek、RSS 或 SMTP 服务始终可用；这些外部链路需要有效凭据和网络环境。
